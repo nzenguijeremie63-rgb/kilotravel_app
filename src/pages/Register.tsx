@@ -59,7 +59,7 @@ export default function Register() {
         description: 'Bienvenue sur Kilotravel!',
       });
   
-      window.location.href = "/dashboard";
+      navigate("/dashboard")
     } catch (error: any) {
       toast({
         title: 'Erreur d\'inscription',
