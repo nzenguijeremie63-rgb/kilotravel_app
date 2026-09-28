@@ -25,17 +25,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkRoles = async (userId: string) => {
     try {
-      const { data: roles } = await supabase
-        .from('user_roles')
+      const { data: profile } = await supabase
+        .from('profiles')
         .select('role')
-        .eq('user_id', userId);
+        .eq('id', userId)
+        .maybeSingle();
 
-      const roleList = roles?.map((r: any) => r.role) || [];
-      setIsAdmin(roleList.includes('admin'));
-      setIsCarrier(roleList.includes('carrier'));
+      const role = profile?.role;
+      setIsAdmin(role === 'admin');
+      setIsCarrier(role === 'carrier');
 
       // Check pending carrier application only if not already a carrier
-      if (!roleList.includes('carrier')) {
+      if (role !== 'carrier') {
         const { data: application } = await supabase
           .from('carrier_applications')
           .select('status')
@@ -91,6 +92,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Écouter les changements en temps réel sur le profil de l'utilisateur
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('profile-role-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        (payload) => {
+          if (payload.new && 'role' in payload.new) {
+            const newRole = (payload.new as any).role;
+            setIsAdmin(newRole === 'admin');
+            setIsCarrier(newRole === 'carrier');
+            if (newRole === 'carrier') {
+              setIsPendingCarrier(false);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const signOut = async () => {
     await supabase.auth.signOut();

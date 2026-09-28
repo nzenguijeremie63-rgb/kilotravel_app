@@ -247,10 +247,11 @@ export default function AdminDashboard() {
 
       // 2. Assigner le rôle carrier à l'utilisateur
       const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert({ user_id: application.user_id, role: 'carrier' });
+        .from('profiles')
+        .update({ role: 'carrier' })
+        .eq('id', application.user_id);
 
-      if (roleError && !roleError.message.includes('duplicate')) throw roleError;
+      if (roleError) throw roleError;
 
       toast({
         title: 'Transporteur approuvé ✅',
