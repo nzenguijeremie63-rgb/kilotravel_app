@@ -41,20 +41,22 @@ const features = [
 ];
 
 export default function Index() {
-  const { user, isCarrier } = useAuth();
+  const { user, isCarrier, isLoading: authLoading } = useAuth();
   const [offers, setOffers] = useState<CargoOffer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedOffer, setSelectedOffer] = useState<CargoOffer | null>(null);
   const [trackingCode, setTrackingCode] = useState('');
   const navigate = useNavigate();
 
+  // Wait for auth to be ready before fetching to avoid Supabase session race condition
   useEffect(() => {
-    fetchOffers();
-  }, []);
+    if (!authLoading) {
+      fetchOffers();
+    }
+  }, [authLoading]);
 
   const fetchOffers = async () => {
     try {
-      console.log("Fetching offers from Supabase...");
       const { data, error } = await supabase
         .from('cargo_offers')
         .select('*')
@@ -62,8 +64,6 @@ export default function Index() {
         .gt('available_kilos', 0)
         .order('departure_date', { ascending: true })
         .limit(3);
-      
-      console.log("Offers response:", { data, error });
 
       if (error) throw error;
       setOffers(data || []);

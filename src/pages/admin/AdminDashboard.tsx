@@ -95,7 +95,7 @@ interface CarrierApplication {
 
 const statusLabels: Record<ShipmentStatus, string> = {
   pending_submission: 'En attente',
-  received_at_origin: 'Reçu à l\'origine',
+  received_at_origin: 'Colis reçu',
   in_transit: 'En transit',
   arrived_at_destination: 'Arrivé',
   delivered: 'Livré',
@@ -917,7 +917,7 @@ export default function AdminDashboard() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="pending_submission">En attente</SelectItem>
-                <SelectItem value="received_at_origin">Reçu à l'origine</SelectItem>
+                <SelectItem value="received_at_origin">Colis reçu</SelectItem>
                 <SelectItem value="in_transit">En transit</SelectItem>
                 <SelectItem value="arrived_at_destination">Arrivé à destination</SelectItem>
                 <SelectItem value="delivered">Livré</SelectItem>

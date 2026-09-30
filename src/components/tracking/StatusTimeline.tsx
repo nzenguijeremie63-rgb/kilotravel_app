@@ -19,7 +19,7 @@ const statusConfig: {
   icon: typeof Clock;
 }[] = [
   { key: 'pending_submission', label: 'En attente', icon: Clock },
-  { key: 'received_at_origin', label: 'Reçu à l\'origine', icon: Package },
+  { key: 'received_at_origin', label: 'Colis reçu', icon: Package },
   { key: 'in_transit', label: 'En transit', icon: Plane },
   { key: 'arrived_at_destination', label: 'Arrivé à destination', icon: MapPin },
   { key: 'delivered', label: 'Livré', icon: Home },

@@ -15,8 +15,8 @@ console.log("SUPABASE_KEY:", supabaseAnonKey);
 export const supabase = createClient<Database>(SUPABASE_URL, supabaseAnonKey, {
   auth: {
     storage: localStorage,
-    persistSession: false,
-    autoRefreshToken: false,
+    persistSession: true,
+    autoRefreshToken: true,
   }
 });
 

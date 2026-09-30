@@ -6,6 +6,7 @@ import { ReservationModal } from '@/components/cargo/ReservationModal';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/lib/auth-context';
 
 interface CargoOffer {
   id: string;
@@ -21,14 +22,18 @@ interface CargoOffer {
 }
 
 export default function Offers() {
+  const { isLoading: authLoading } = useAuth();
   const [offers, setOffers] = useState<CargoOffer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedOffer, setSelectedOffer] = useState<CargoOffer | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Wait for auth to be ready before fetching to avoid Supabase session race condition
   useEffect(() => {
-    fetchOffers();
-  }, []);
+    if (!authLoading) {
+      fetchOffers();
+    }
+  }, [authLoading]);
 
   const fetchOffers = async () => {
     try {

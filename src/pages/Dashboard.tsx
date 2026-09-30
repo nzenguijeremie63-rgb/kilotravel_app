@@ -53,7 +53,7 @@ interface Reservation {
 
 const statusLabels: Record<ShipmentStatus, string> = {
   pending_submission: 'En attente',
-  received_at_origin: 'Reçu',
+  received_at_origin: 'Colis reçu',
   in_transit: 'En transit',
   arrived_at_destination: 'Arrivé',
   delivered: 'Livré',

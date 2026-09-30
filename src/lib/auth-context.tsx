@@ -60,37 +60,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Set up auth state listener FIRST
+    // Use onAuthStateChange as the SINGLE source of truth.
+    // It fires immediately with the current session on mount (INITIAL_SESSION event),
+    // so there is no need for a separate getSession() call which can cause race conditions.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
-        
+
         if (session?.user) {
-          await checkRoles(session.user.id);
+          // Use setTimeout to avoid Supabase deadlock when calling other supabase
+          // queries inside onAuthStateChange
+          setTimeout(async () => {
+            await checkRoles(session.user.id);
+            setIsLoading(false);
+          }, 0);
         } else {
           setIsAdmin(false);
           setIsCarrier(false);
           setIsPendingCarrier(false);
+          setIsLoading(false);
         }
-        
-        setIsLoading(false);
       }
     );
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        await checkRoles(session.user.id);
-      }
-      
-      setIsLoading(false);
-    });
+    // Safety net: force isLoading to false after 3s in case auth never fires
+    const safetyTimer = setTimeout(() => setIsLoading(false), 3000);
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(safetyTimer);
+    };
   }, []);
 
   // Écouter les changements en temps réel sur le profil de l'utilisateur

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Search, Package, Plane, AlertCircle } from 'lucide-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Search, Package, Plane, AlertCircle, Lock } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CountryFlag } from '@/components/ui/CountryFlag';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/lib/auth-context';
 
 type ShipmentStatus = 
   | 'pending_submission'
@@ -39,11 +40,22 @@ interface Reservation {
 
 export default function Track() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { user, isLoading: authLoading } = useAuth();
   const [trackingCode, setTrackingCode] = useState(searchParams.get('code') || '');
   const [reservation, setReservation] = useState<Reservation | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      const code = searchParams.get('code');
+      const redirectUrl = code ? `/track?code=${code}` : '/track';
+      navigate(`/login?redirect=${encodeURIComponent(redirectUrl)}`, { replace: true });
+    }
+  }, [user, authLoading, navigate, searchParams]);
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -130,6 +142,20 @@ export default function Track() {
     e.preventDefault();
     handleSearch();
   };
+
+  // Show spinner while auth status is being determined
+  if (authLoading) {
+    return (
+      <MainLayout>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="h-12 w-12 rounded-full border-4 border-secondary border-t-transparent animate-spin" />
+        </div>
+      </MainLayout>
+    );
+  }
+
+  // If not logged in, render nothing (redirect is handled by useEffect)
+  if (!user) return null;
 
   return (
     <MainLayout>
