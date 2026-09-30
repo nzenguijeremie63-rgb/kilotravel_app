@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kilotravel-cache-v1';
+const CACHE_NAME = 'kilotravel-cache-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -13,7 +13,14 @@ self.addEventListener('install', (event) => {
       return cache.addAll(STATIC_ASSETS);
     })
   );
-  self.skipWaiting();
+  // Do NOT call self.skipWaiting() here — we wait for the app to send SKIP_WAITING
+});
+
+// Listen for SKIP_WAITING message from the app to activate the new SW
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {
