@@ -65,6 +65,42 @@ export type Database = {
         }
         Relationships: []
       }
+      carrier_applications: {
+        Row: {
+          id: string
+          user_id: string
+          full_name: string
+          phone_number: string
+          city: string
+          id_document_url: string | null
+          preferred_routes: string | null
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          full_name: string
+          phone_number: string
+          city: string
+          id_document_url?: string | null
+          preferred_routes?: string | null
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          full_name?: string
+          phone_number?: string
+          city?: string
+          id_document_url?: string | null
+          preferred_routes?: string | null
+          status?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
