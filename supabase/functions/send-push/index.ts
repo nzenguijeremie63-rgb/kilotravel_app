@@ -47,7 +47,7 @@ serve(async (req) => {
         };
       }
     } else if (table === "carrier_applications") {
-      // Notification pour l'admin lors d'une nouvelle demande de transporteur
+      // 1. Notification pour l'admin lors d'une nouvelle demande de transporteur
       if (type === "INSERT") {
         const { data: admins } = await supabaseAdmin
           .from("profiles")
@@ -61,6 +61,42 @@ serve(async (req) => {
         notificationPayload = {
           title: "Nouvelle candidature de transporteur",
           body: "Un nouveau transporteur vient de s'inscrire et attend d'être validé.",
+        };
+      } else if (type === "UPDATE" && record.status === "approved" && old_record?.status !== "approved") {
+        // 2. Notification pour le transporteur validé
+        targetUserIds = [record.user_id];
+        notificationPayload = {
+          title: "Compte transporteur validé 🎉",
+          body: "Félicitations ! Votre profil transporteur a été approuvé. Vous pouvez désormais publier vos offres de kilos !",
+        };
+
+        // Envoi automatique d'email via Resend si configuré
+        const resendApiKey = Deno.env.get("RESEND_API_KEY");
+        if (record.email && resendApiKey) {
+          try {
+            await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${resendApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                from: Deno.env.get("RESEND_FROM_EMAIL") || "Kilotravel <notifications@kilotravel.com>",
+                to: [record.email],
+                subject: "Votre compte transporteur / vendeur Kilotravel est APPROUVÉ ! 🎉",
+                text: `Bonjour ${record.full_name} !\n\nFélicitations, votre dossier a été vérifié et votre compte transporteur / vendeur Kilotravel est désormais APPROUVÉ !\n\nVous pouvez dès à présent vous connecter et publier vos premières offres de transport de kilos\n\nBienvenue dans le réseau Kilotravel !`,
+              }),
+            });
+          } catch (mailErr) {
+            console.error("Error sending approval email via Resend:", mailErr);
+          }
+        }
+      } else if (type === "UPDATE" && record.status === "rejected" && old_record?.status !== "rejected") {
+        // 3. Notification en cas de refus
+        targetUserIds = [record.user_id];
+        notificationPayload = {
+          title: "Demande de transporteur",
+          body: "Votre demande de statut transporteur n'a pas été retenue.",
         };
       }
     }

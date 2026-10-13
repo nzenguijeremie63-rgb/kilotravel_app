@@ -4,7 +4,8 @@ import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { 
   Package, Users, Plane, Plus, Edit, Trash2, 
-  ChevronDown, Search, ArrowUpDown, UserCheck, Clock, CheckCircle2, XCircle, ExternalLink, Bell, BellOff
+  ChevronDown, Search, ArrowUpDown, UserCheck, Clock, CheckCircle2, XCircle, ExternalLink, Bell, BellOff,
+  MessageCircle, Mail
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -86,6 +87,7 @@ interface CarrierApplication {
   user_id: string;
   full_name: string;
   phone_number: string;
+  email?: string | null;
   city: string;
   id_document_url: string | null;
   preferred_routes: string | null;
@@ -143,6 +145,10 @@ export default function AdminDashboard() {
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [newStatus, setNewStatus] = useState<ShipmentStatus>('pending_submission');
+
+  // Carrier approval notification modal
+  const [notifyModalOpen, setNotifyModalOpen] = useState(false);
+  const [approvedCarrier, setApprovedCarrier] = useState<CarrierApplication | null>(null);
 
   useEffect(() => {
     if (!authLoading && (!user || !isAdmin)) {
@@ -235,6 +241,21 @@ export default function AdminDashboard() {
     }
   };
 
+  const getCleanPhone = (phone: string) => phone.replace(/[^0-9]/g, '');
+
+  const openWhatsAppNotification = (app: CarrierApplication) => {
+    const phone = getCleanPhone(app.phone_number);
+    const msg = `Bonjour ${app.full_name} !\n\nFélicitations, votre dossier a été vérifié et votre compte transporteur / vendeur Kilotravel est désormais APPROUVÉ !\n\nVous pouvez dès à présent vous connecter et publier vos premières offres de transport de kilos\n\nBienvenue dans le réseau Kilotravel !`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  const openEmailNotification = (app: CarrierApplication) => {
+    const email = app.email || '';
+    const subject = `Votre compte transporteur / vendeur Kilotravel est APPROUVÉ ! 🎉`;
+    const body = `Bonjour ${app.full_name} !\n\nFélicitations, votre dossier a été vérifié et votre compte transporteur / vendeur Kilotravel est désormais APPROUVÉ !\n\nVous pouvez dès à présent vous connecter et publier vos premières offres de transport de kilos\n\nBienvenue dans le réseau Kilotravel !`;
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
   const handleApproveCarrier = async (application: CarrierApplication) => {
     try {
       // 1. Mettre à jour le statut de la demande
@@ -245,18 +266,20 @@ export default function AdminDashboard() {
 
       if (updateError) throw updateError;
 
-      // 2. Assigner le rôle carrier à l'utilisateur
-      const { error: roleError } = await supabase
+      // 2. Assigner le rôle carrier au profil (également assuré par le trigger SQL)
+      await supabase
         .from('profiles')
         .update({ role: 'carrier' })
         .eq('id', application.user_id);
 
-      if (roleError) throw roleError;
-
       toast({
         title: 'Transporteur approuvé ✅',
-        description: `${application.full_name} peut désormais publier des offres.`,
+        description: `${application.full_name} est désormais transporteur agréé.`,
       });
+
+      // Ouvrir la modal de proposition de notification WhatsApp / Email
+      setApprovedCarrier(application);
+      setNotifyModalOpen(true);
 
       fetchData();
     } catch (err: any) {
@@ -721,6 +744,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="text-sm text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
                               <span>📞 {app.phone_number}</span>
+                              {app.email && <span>✉️ {app.email}</span>}
                               <span>📍 {app.city}</span>
                               {app.preferred_routes && <span>✈️ {app.preferred_routes}</span>}
                             </div>
@@ -741,6 +765,34 @@ export default function AdminDashboard() {
                                 Pièce d'identité
                               </Button>
                             )}
+
+                            {app.status === 'approved' && (
+                              <div className="flex items-center gap-1.5">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950 border-emerald-500/30 gap-1 text-xs"
+                                  onClick={() => openWhatsAppNotification(app)}
+                                  title="Envoyer message de félicitations sur WhatsApp"
+                                >
+                                  <MessageCircle className="h-3.5 w-3.5" />
+                                  WhatsApp
+                                </Button>
+                                {app.email && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="gap-1 text-xs"
+                                    onClick={() => openEmailNotification(app)}
+                                    title="Envoyer email d'approbation"
+                                  >
+                                    <Mail className="h-3.5 w-3.5" />
+                                    Email
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+
                             {app.status === 'pending' && (
                               <>
                                 <Button
@@ -935,6 +987,65 @@ export default function AdminDashboard() {
               className="bg-secondary text-secondary-foreground"
             >
               {isSaving ? 'Mise à jour...' : 'Mettre à jour'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Carrier Notification Modal (WhatsApp / Email) */}
+      <Dialog open={notifyModalOpen} onOpenChange={setNotifyModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <CheckCircle2 className="h-5 w-5 text-success" />
+              Notifier le transporteur validé
+            </DialogTitle>
+            <DialogDescription>
+              {approvedCarrier?.full_name} a été approuvé avec succès. Vous pouvez maintenant l'informer directement par WhatsApp ou Email.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-3">
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
+              <p><span className="text-muted-foreground">Transporteur :</span> <strong className="text-foreground">{approvedCarrier?.full_name}</strong></p>
+              <p><span className="text-muted-foreground">Numéro WhatsApp :</span> <strong className="text-foreground">{approvedCarrier?.phone_number}</strong></p>
+              {approvedCarrier?.email && (
+                <p><span className="text-muted-foreground">Email :</span> <strong className="text-foreground">{approvedCarrier?.email}</strong></p>
+              )}
+            </div>
+
+            <div className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground space-y-1 font-mono whitespace-pre-line border">
+              <span className="font-sans font-semibold text-foreground text-xs block mb-1">Message envoyé :</span>
+              {`Bonjour ${approvedCarrier?.full_name || '...'} !\n\nFélicitations, votre dossier a été vérifié et votre compte transporteur / vendeur Kilotravel est désormais APPROUVÉ !\n\nVous pouvez dès à présent vous connecter et publier vos premières offres de transport de kilos\n\nBienvenue dans le réseau Kilotravel !`}
+            </div>
+
+            <Button
+              className="w-full bg-[#25D366] hover:bg-[#20ba5a] text-white font-medium gap-2 justify-center shadow-sm"
+              onClick={() => {
+                if (approvedCarrier) openWhatsAppNotification(approvedCarrier);
+              }}
+            >
+              <MessageCircle className="h-4 w-4" />
+              Envoyer notification via WhatsApp
+            </Button>
+
+            {approvedCarrier?.email && (
+              <Button
+                variant="outline"
+                className="w-full gap-2 justify-center"
+                onClick={() => {
+                  if (approvedCarrier) openEmailNotification(approvedCarrier);
+                }}
+              >
+                <Mail className="h-4 w-4" />
+                Envoyer notification par Email
+              </Button>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" className="w-full" onClick={() => setNotifyModalOpen(false)}>
+              Fermer
             </Button>
           </DialogFooter>
         </DialogContent>

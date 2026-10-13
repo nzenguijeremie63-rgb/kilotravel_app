@@ -18,10 +18,17 @@ export default function BecomeCarrier() {
 
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [city, setCity] = useState('');
   const [idFile, setIdFile] = useState<File | null>(null);
   const [preferredRoutes, setPreferredRoutes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (user?.email && !email) {
+      setEmail(user.email);
+    }
+  }, [user]);
 
   // Already a carrier → redirect to dashboard
   if (isCarrier) {
@@ -87,10 +94,10 @@ export default function BecomeCarrier() {
       return;
     }
 
-    if (!fullName.trim() || !phoneNumber.trim() || !city.trim()) {
+    if (!fullName.trim() || !phoneNumber.trim() || !email.trim() || !city.trim()) {
       toast({
         title: 'Champs incomplets',
-        description: 'Veuillez remplir votre nom, téléphone et ville.',
+        description: 'Veuillez remplir votre nom, téléphone, adresse email et ville.',
         variant: 'destructive',
       });
       return;
@@ -124,6 +131,7 @@ export default function BecomeCarrier() {
         user_id: user.id,
         full_name: fullName.trim(),
         phone_number: phoneNumber.trim(),
+        email: email.trim(),
         city: city.trim(),
         id_document_url: filePath,
         preferred_routes: preferredRoutes.trim() || null,
@@ -255,20 +263,32 @@ export default function BecomeCarrier() {
                           id="carrierPhone"
                           value={phoneNumber}
                           onChange={(e) => setPhoneNumber(e.target.value)}
-                          placeholder="+242 06 123 45 67"
+                          placeholder="+221 78 523 95 01"
                           required
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="carrierCity">Ville de résidence *</Label>
+                        <Label htmlFor="carrierEmail">Adresse Email *</Label>
                         <Input
-                          id="carrierCity"
-                          value={city}
-                          onChange={(e) => setCity(e.target.value)}
-                          placeholder="Ex: Brazzaville, Dakar, Paris"
+                          id="carrierEmail"
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="votre.email@exemple.com"
                           required
                         />
                       </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="carrierCity">Ville de résidence *</Label>
+                      <Input
+                        id="carrierCity"
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                        placeholder="Ex: Dakar, Paris, Brazzaville"
+                        required
+                      />
                     </div>
 
                     <div className="space-y-2">

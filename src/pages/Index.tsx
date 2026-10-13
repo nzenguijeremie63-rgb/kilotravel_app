@@ -259,7 +259,7 @@ export default function Index() {
             className="bg-secondary hover:bg-secondary/90 text-secondary-foreground shadow-coral"
           >
             {user && isCarrier ? (
-              <Link to="/dashboard">
+              <Link to="/dashboard?tab=carrier-offers&new=1">
                 Publier une offre
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Link>

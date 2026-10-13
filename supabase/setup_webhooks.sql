@@ -49,8 +49,8 @@ CREATE TRIGGER on_reservation_change
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_edge_function();
 
--- Trigger pour les demandes de transporteurs (INSERT)
+-- Trigger pour les demandes de transporteurs (INSERT pour l'admin, UPDATE pour la validation)
 CREATE TRIGGER on_carrier_app_change
-  AFTER INSERT ON public.carrier_applications
+  AFTER INSERT OR UPDATE ON public.carrier_applications
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_edge_function();

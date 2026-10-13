@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Écouter les changements en temps réel sur le profil de l'utilisateur
+  // Écouter les changements en temps réel sur le profil et les candidatures de l'utilisateur
   useEffect(() => {
     if (!user) return;
 
@@ -111,6 +111,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setIsPendingCarrier(false);
             }
           }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'carrier_applications', filter: `user_id=eq.${user.id}` },
+        async () => {
+          // Re-vérifier les rôles et le statut pending dès qu'une modification survient sur la demande
+          await checkRoles(user.id);
         }
       )
       .subscribe();

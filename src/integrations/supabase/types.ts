@@ -30,6 +30,7 @@ export type Database = {
           price_per_kilo: number
           total_kilos: number
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           arrival_city: string
@@ -46,6 +47,7 @@ export type Database = {
           price_per_kilo: number
           total_kilos: number
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           arrival_city?: string
@@ -62,6 +64,7 @@ export type Database = {
           price_per_kilo?: number
           total_kilos?: number
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -72,6 +75,7 @@ export type Database = {
           full_name: string
           phone_number: string
           city: string
+          email: string | null
           id_document_url: string | null
           preferred_routes: string | null
           status: string
@@ -83,6 +87,7 @@ export type Database = {
           full_name: string
           phone_number: string
           city: string
+          email?: string | null
           id_document_url?: string | null
           preferred_routes?: string | null
           status?: string
@@ -94,6 +99,7 @@ export type Database = {
           full_name?: string
           phone_number?: string
           city?: string
+          email?: string | null
           id_document_url?: string | null
           preferred_routes?: string | null
           status?: string
