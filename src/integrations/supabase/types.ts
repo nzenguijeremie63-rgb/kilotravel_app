@@ -28,6 +28,7 @@ export type Database = {
           id: string
           is_active: boolean | null
           price_per_kilo: number
+          status?: string | null
           total_kilos: number
           updated_at: string
           user_id: string | null
@@ -45,6 +46,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           price_per_kilo: number
+          status?: string | null
           total_kilos: number
           updated_at?: string
           user_id?: string | null
@@ -62,6 +64,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           price_per_kilo?: number
+          status?: string | null
           total_kilos?: number
           updated_at?: string
           user_id?: string | null

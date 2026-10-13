@@ -1,11 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { 
   Package, Plane, User, Phone, FileText, ArrowRight, Clock, 
   PlusCircle, Edit, Trash2, CheckCircle2, MessageCircle, AlertCircle, 
-  Send, Sparkles, ShieldCheck, ChevronRight, ToggleLeft, ToggleRight
+  Send, Sparkles, ShieldCheck, ChevronRight, ToggleLeft, ToggleRight,
+  ChevronDown, ChevronUp, Lock, Check, CheckCheck, Boxes, Bell, BellOff,
+  ArrowUpDown, Calendar, Search, RotateCcw, SlidersHorizontal, Filter, X,
+  Sunrise, Sun, Sunset, Moon, CalendarCheck, CalendarRange, CalendarDays, Scale, History, MapPin
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { StatusTimeline } from '@/components/tracking/StatusTimeline';
@@ -25,6 +28,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -35,14 +54,31 @@ import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useNotifications } from '@/hooks/use-notifications';
-import { Bell, BellOff } from 'lucide-react';
 
-type ShipmentStatus = 
+export type ShipmentStatus = 
   | 'pending_submission'
   | 'received_at_origin'
   | 'in_transit'
   | 'arrived_at_destination'
   | 'delivered';
+
+export type OfferStatus = 'active' | 'collecting' | 'in_transit' | 'delivered' | 'closed';
+
+export const offerStatusLabels: Record<OfferStatus, string> = {
+  active: 'Disponible',
+  collecting: 'Réception colis',
+  in_transit: 'En transit',
+  delivered: 'Livrée / Terminée',
+  closed: 'Clôturée',
+};
+
+export const offerStatusBadgeStyles: Record<OfferStatus, string> = {
+  active: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-950/70',
+  collecting: 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-950/70',
+  in_transit: 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100 hover:text-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800 dark:hover:bg-blue-950/70',
+  delivered: 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700',
+  closed: 'bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100 hover:text-rose-900 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800 dark:hover:bg-rose-950/70',
+};
 
 interface Profile {
   full_name: string | null;
@@ -83,6 +119,7 @@ interface CarrierOffer {
   available_kilos: number;
   price_per_kilo: number;
   is_active: boolean;
+  status?: string | null;
   created_at: string;
 }
 
@@ -114,11 +151,11 @@ const statusLabels: Record<ShipmentStatus, string> = {
 };
 
 const statusColors: Record<ShipmentStatus, string> = {
-  pending_submission: 'bg-warning text-warning-foreground',
-  received_at_origin: 'bg-info text-info-foreground',
-  in_transit: 'bg-secondary text-secondary-foreground',
-  arrived_at_destination: 'bg-info text-info-foreground',
-  delivered: 'bg-success text-success-foreground',
+  pending_submission: 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
+  received_at_origin: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
+  in_transit: 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800',
+  arrived_at_destination: 'bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-800',
+  delivered: 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700',
 };
 
 const defaultNewOffer: Partial<CarrierOffer> = {
@@ -160,10 +197,30 @@ export default function Dashboard() {
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [selectedBookingToUpdate, setSelectedBookingToUpdate] = useState<ReceivedReservation | null>(null);
   const [newStatus, setNewStatus] = useState<ShipmentStatus>('pending_submission');
+
+  // Bulk close carrier offers state & parcel inspection
+  const [isBulkCloseOpen, setIsBulkCloseOpen] = useState(false);
+  const [isClosingAll, setIsClosingAll] = useState(false);
+  const [expandedOfferId, setExpandedOfferId] = useState<string | null>(null);
+  const [quickUpdatingBookingId, setQuickUpdatingBookingId] = useState<string | null>(null);
+  const [filterBookingsStatus, setFilterBookingsStatus] = useState<string>('all');
   
-  // Active Tab handling
-  const defaultTab = isCarrier ? 'carrier-offers' : 'reservations';
-  const currentTab = searchParams.get('tab') || defaultTab;
+  // Carrier received bookings sorting and advanced filtering states
+  const [bookingSortBy, setBookingSortBy] = useState<
+    'arrival_desc' | 'arrival_asc' | 'flight_asc' | 'flight_desc' | 'weight_desc' | 'weight_asc'
+  >('arrival_desc');
+  const [bookingSearch, setBookingSearch] = useState('');
+  const [bookingDateFilter, setBookingDateFilter] = useState<'all' | 'today' | 'this_week' | 'custom'>('all');
+  const [bookingCustomDate, setBookingCustomDate] = useState('');
+  const [bookingHourFilter, setBookingHourFilter] = useState<'all' | 'morning' | 'afternoon' | 'evening' | 'night'>('all');
+  const [bookingOfferFilter, setBookingOfferFilter] = useState<string>('all');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  // Client personal reservations sorting, hour and date filters
+  const [clientSortBy, setClientSortBy] = useState<'arrival_desc' | 'arrival_asc' | 'flight_asc'>('arrival_desc');
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientHourFilter, setClientHourFilter] = useState<'all' | 'morning' | 'afternoon' | 'evening' | 'night'>('all');
+  const [clientDateFilter, setClientDateFilter] = useState<'all' | 'today' | 'this_week'>('all');
 
   // Form state
   const [fullName, setFullName] = useState('');
@@ -533,6 +590,136 @@ export default function Dashboard() {
     }
   };
 
+  const handleUpdateCarrierOfferStatus = async (offerId: string, nextStatus: OfferStatus) => {
+    if (!user) return;
+    try {
+      const isActive = nextStatus === 'active' || nextStatus === 'collecting';
+      const { error } = await supabase
+        .from('cargo_offers')
+        .update({
+          status: nextStatus,
+          is_active: isActive,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', offerId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      toast({
+        title: 'Statut de l\'offre mis à jour',
+        description: `Votre offre est désormais "${offerStatusLabels[nextStatus]}".`,
+      });
+      fetchData();
+    } catch (err: any) {
+      toast({
+        title: 'Erreur',
+        description: err.message || 'Impossible de modifier le statut.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCloseAllCarrierOffers = async () => {
+    if (!user) return;
+    setIsClosingAll(true);
+    try {
+      let closedCount = 0;
+      const { data: rpcCount, error: rpcError } = await supabase.rpc('close_carrier_active_offers');
+
+      if (!rpcError && typeof rpcCount === 'number') {
+        closedCount = rpcCount;
+      } else {
+        const { data, error } = await supabase
+          .from('cargo_offers')
+          .update({
+            is_active: false,
+            status: 'closed',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .select();
+
+        if (error) throw error;
+        closedCount = data?.length || 0;
+      }
+
+      toast({
+        title: 'Offres clôturées avec succès',
+        description: `Vos ${closedCount} offre(s) active(s) ont été clôturées et masquées aux clients.`,
+      });
+      setIsBulkCloseOpen(false);
+      fetchData();
+    } catch (err: any) {
+      toast({
+        title: 'Erreur',
+        description: err.message || 'Impossible de clôturer vos offres.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsClosingAll(false);
+    }
+  };
+
+  const handleQuickUpdateBookingStatus = async (bookingId: string, nextStatus: ShipmentStatus) => {
+    setQuickUpdatingBookingId(bookingId);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('reservations')
+        .update({
+          status: nextStatus,
+          status_updated_at: now,
+        })
+        .eq('id', bookingId);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Statut du colis mis à jour ✅',
+        description: `Passé à "${statusLabels[nextStatus]}". Le client a été notifié en temps réel.`,
+      });
+      fetchData();
+    } catch (err: any) {
+      toast({
+        title: 'Erreur',
+        description: err.message || 'Impossible de mettre à jour le statut du colis.',
+        variant: 'destructive',
+      });
+    } finally {
+      setQuickUpdatingBookingId(null);
+    }
+  };
+
+  const handleMarkAllBookingsReceivedForOffer = async (offerId: string) => {
+    try {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('reservations')
+        .update({
+          status: 'received_at_origin',
+          status_updated_at: now,
+        })
+        .eq('cargo_offer_id', offerId)
+        .eq('status', 'pending_submission')
+        .select();
+
+      if (error) throw error;
+      const count = data?.length || 0;
+      toast({
+        title: 'Colis réceptionnés ✅',
+        description: `${count} colis de votre annonce ont été marqués comme reçus !`,
+      });
+      fetchData();
+    } catch (err: any) {
+      toast({
+        title: 'Erreur',
+        description: err.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
   // Status update for received bookings
   const handleOpenStatusModal = (booking: ReceivedReservation) => {
     setSelectedBookingToUpdate(booking);
@@ -584,6 +771,165 @@ export default function Dashboard() {
     const hoursSinceDelivery = (Date.now() - deliveredAt) / (1000 * 60 * 60);
     return hoursSinceDelivery >= 24;
   });
+
+  // Filtered and sorted bookings for carrier (Colis reçus)
+  const filteredAndSortedReceivedBookings = useMemo(() => {
+    return receivedBookings
+      .filter((booking) => {
+        // 1. Status filter
+        if (filterBookingsStatus !== 'all' && booking.status !== filterBookingsStatus) {
+          return false;
+        }
+
+        // 2. Search query (tracking code, client name, phone, description, route cities)
+        if (bookingSearch.trim()) {
+          const q = bookingSearch.toLowerCase().trim();
+          const tracking = (booking.tracking_code || '').toLowerCase();
+          const clientName = (booking.client_name || '').toLowerCase();
+          const clientPhone = (booking.client_phone || '').toLowerCase();
+          const desc = (booking.shipment_description || '').toLowerCase();
+          const depCity = (booking.cargo_offers?.departure_city || '').toLowerCase();
+          const arrCity = (booking.cargo_offers?.arrival_city || '').toLowerCase();
+
+          const matches =
+            tracking.includes(q) ||
+            clientName.includes(q) ||
+            clientPhone.includes(q) ||
+            desc.includes(q) ||
+            depCity.includes(q) ||
+            arrCity.includes(q);
+
+          if (!matches) return false;
+        }
+
+        // 3. Offer filter
+        if (bookingOfferFilter !== 'all' && booking.cargo_offers?.id !== bookingOfferFilter) {
+          return false;
+        }
+
+        // 4. Date filter (based on creation/arrival of the booking)
+        const bookingDate = new Date(booking.created_at);
+        if (bookingDateFilter === 'today') {
+          const now = new Date();
+          const isSameDay =
+            bookingDate.getDate() === now.getDate() &&
+            bookingDate.getMonth() === now.getMonth() &&
+            bookingDate.getFullYear() === now.getFullYear();
+          if (!isSameDay) return false;
+        } else if (bookingDateFilter === 'this_week') {
+          const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          if (bookingDate.getTime() < oneWeekAgo) return false;
+        } else if (bookingDateFilter === 'custom' && bookingCustomDate) {
+          const customDateStr = format(bookingDate, 'yyyy-MM-dd');
+          if (customDateStr !== bookingCustomDate) return false;
+        }
+
+        // 5. Hour filter (créneaux horaires d'arrivée)
+        if (bookingHourFilter !== 'all') {
+          const hours = bookingDate.getHours();
+          if (bookingHourFilter === 'morning' && (hours < 6 || hours >= 12)) return false; // 06h - 12h
+          if (bookingHourFilter === 'afternoon' && (hours < 12 || hours >= 18)) return false; // 12h - 18h
+          if (bookingHourFilter === 'evening' && (hours < 18 || hours >= 24)) return false; // 18h - 00h
+          if (bookingHourFilter === 'night' && hours >= 6) return false; // 00h - 06h
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (bookingSortBy === 'arrival_desc') {
+          // Plus récentes arrivées d'abord
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        }
+        if (bookingSortBy === 'arrival_asc') {
+          // Premières arrivées en premier (ordre d'arrivée chronologique)
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        }
+        if (bookingSortBy === 'flight_asc') {
+          return new Date(a.cargo_offers.departure_date).getTime() - new Date(b.cargo_offers.departure_date).getTime();
+        }
+        if (bookingSortBy === 'flight_desc') {
+          return new Date(b.cargo_offers.departure_date).getTime() - new Date(a.cargo_offers.departure_date).getTime();
+        }
+        if (bookingSortBy === 'weight_desc') {
+          return b.kilos_reserved - a.kilos_reserved;
+        }
+        if (bookingSortBy === 'weight_asc') {
+          return a.kilos_reserved - b.kilos_reserved;
+        }
+        return 0;
+      });
+  }, [
+    receivedBookings,
+    filterBookingsStatus,
+    bookingSearch,
+    bookingOfferFilter,
+    bookingDateFilter,
+    bookingCustomDate,
+    bookingHourFilter,
+    bookingSortBy,
+  ]);
+
+  const hasActiveBookingFilters =
+    filterBookingsStatus !== 'all' ||
+    bookingSearch.trim() !== '' ||
+    bookingDateFilter !== 'all' ||
+    bookingHourFilter !== 'all' ||
+    bookingOfferFilter !== 'all' ||
+    bookingSortBy !== 'arrival_desc';
+
+  const resetBookingFilters = () => {
+    setFilterBookingsStatus('all');
+    setBookingSearch('');
+    setBookingDateFilter('all');
+    setBookingCustomDate('');
+    setBookingHourFilter('all');
+    setBookingOfferFilter('all');
+    setBookingSortBy('arrival_desc');
+  };
+
+  // Filtered and sorted client reservations
+  const filteredAndSortedClientReservations = useMemo(() => {
+    return activeReservations
+      .filter((r) => {
+        if (clientSearch.trim()) {
+          const q = clientSearch.toLowerCase().trim();
+          const tracking = (r.tracking_code || '').toLowerCase();
+          const depCity = (r.cargo_offers?.departure_city || '').toLowerCase();
+          const arrCity = (r.cargo_offers?.arrival_city || '').toLowerCase();
+          const desc = (r.shipment_description || '').toLowerCase();
+          if (!tracking.includes(q) && !depCity.includes(q) && !arrCity.includes(q) && !desc.includes(q)) {
+            return false;
+          }
+        }
+        const d = new Date(r.created_at);
+        if (clientDateFilter === 'today') {
+          const now = new Date();
+          if (d.getDate() !== now.getDate() || d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
+        } else if (clientDateFilter === 'this_week') {
+          if (d.getTime() < Date.now() - 7 * 86400000) return false;
+        }
+        if (clientHourFilter !== 'all') {
+          const h = d.getHours();
+          if (clientHourFilter === 'morning' && (h < 6 || h >= 12)) return false;
+          if (clientHourFilter === 'afternoon' && (h < 12 || h >= 18)) return false;
+          if (clientHourFilter === 'evening' && (h < 18 || h >= 24)) return false;
+          if (clientHourFilter === 'night' && h >= 6) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (clientSortBy === 'arrival_desc') {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        }
+        if (clientSortBy === 'arrival_asc') {
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        }
+        if (clientSortBy === 'flight_asc') {
+          return new Date(a.cargo_offers.departure_date).getTime() - new Date(b.cargo_offers.departure_date).getTime();
+        }
+        return 0;
+      });
+  }, [activeReservations, clientSearch, clientSortBy, clientDateFilter, clientHourFilter]);
 
   if (authLoading || isLoading) {
     return (
@@ -738,19 +1084,37 @@ export default function Dashboard() {
             {/* CARRIER TAB 1: Mes offres publiées */}
             {isCarrier && (
               <TabsContent value="carrier-offers" className="space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-lg font-semibold text-foreground">Vos annonces de transport</h2>
-                    <p className="text-xs text-muted-foreground">Gérez vos trajets réguliers ou ponctuels et le nombre de kilos disponibles</p>
+                    <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                      <Plane className="h-5 w-5 text-secondary" />
+                      Vos annonces de transport ({carrierOffers.length})
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {carrierOffers.filter(o => o.is_active).length} active(s) • {carrierOffers.filter(o => !o.is_active).length} clôturée(s)
+                    </p>
                   </div>
-                  <Button 
-                    onClick={handleOpenNewOfferModal} 
-                    size="sm"
-                    className="bg-secondary hover:bg-secondary/90 text-secondary-foreground gap-1.5"
-                  >
-                    <PlusCircle className="h-4 w-4" />
-                    Nouvelle offre
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button 
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground gap-1.5 text-xs font-medium"
+                      disabled={carrierOffers.filter(o => o.is_active).length === 0 || isClosingAll}
+                      onClick={() => setIsBulkCloseOpen(true)}
+                      title="Clôturer toutes vos offres actives en un clic"
+                    >
+                      <Lock className="h-3.5 w-3.5" />
+                      Clôturer toutes mes offres ({carrierOffers.filter(o => o.is_active).length})
+                    </Button>
+                    <Button 
+                      onClick={handleOpenNewOfferModal} 
+                      size="sm"
+                      className="bg-secondary hover:bg-secondary/90 text-secondary-foreground gap-1.5 text-xs"
+                    >
+                      <PlusCircle className="h-4 w-4" />
+                      Nouvelle offre
+                    </Button>
+                  </div>
                 </div>
 
                 {carrierOffers.length === 0 ? (
@@ -764,7 +1128,7 @@ export default function Dashboard() {
                         Vous êtes désormais transporteur agréé ! Publiez votre première offre pour commencer à recevoir des demandes de réservation.
                       </p>
                       <Button 
-                        onClick={handleOpenNewOfferModal}
+                        onClick={handleOpenNewOfferModal} 
                         className="bg-secondary hover:bg-secondary/90 text-secondary-foreground shadow-coral gap-2"
                       >
                         <PlusCircle className="h-4 w-4" />
@@ -774,76 +1138,243 @@ export default function Dashboard() {
                   </Card>
                 ) : (
                   <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {carrierOffers.map((offer) => (
-                      <Card key={offer.id} className="relative overflow-hidden border transition-all hover:shadow-md">
-                        <CardHeader className="pb-3">
-                          <div className="flex items-center justify-between">
-                            <Badge variant={offer.is_active ? 'default' : 'secondary'} className={offer.is_active ? 'bg-success text-success-foreground' : ''}>
-                              {offer.is_active ? 'Active' : 'Désactivée'}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {format(new Date(offer.departure_date), 'dd MMM yyyy', { locale: fr })}
-                            </span>
-                          </div>
-                          <CardTitle className="pt-2 text-base flex items-center gap-2">
-                            <CountryFlag country={offer.departure_country} flag={offer.departure_country_flag} size="sm" />
-                            <span>{offer.departure_city}</span>
-                            <Plane className="h-3.5 w-3.5 text-secondary rotate-45 mx-1" />
-                            <span>{offer.arrival_city}</span>
-                            <CountryFlag country={offer.arrival_country} flag={offer.arrival_country_flag} size="sm" />
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="grid grid-cols-2 gap-2 p-3 bg-muted/40 rounded-lg text-xs">
-                            <div>
-                              <p className="text-muted-foreground">Kilos disponibles</p>
-                              <p className="font-semibold text-sm text-foreground">
-                                {offer.available_kilos} / {offer.total_kilos} kg
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-muted-foreground">Prix par kilo</p>
-                              <p className="font-semibold text-sm text-secondary">
-                                {offer.price_per_kilo.toLocaleString()} FCFA
-                              </p>
-                            </div>
-                          </div>
+                    {carrierOffers.map((offer) => {
+                      const offerBookings = receivedBookings.filter(b => b.cargo_offers.id === offer.id);
+                      const pendingBookings = offerBookings.filter(b => b.status === 'pending_submission');
+                      const currentOfferStatus = ((offer.status as OfferStatus) || (offer.is_active ? 'active' : 'closed')) as OfferStatus;
 
-                          <div className="flex items-center justify-between pt-2 border-t border-border gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-xs gap-1"
-                              onClick={() => handleToggleOfferActive(offer)}
-                            >
-                              {offer.is_active ? <ToggleRight className="h-4 w-4 text-success" /> : <ToggleLeft className="h-4 w-4" />}
-                              {offer.is_active ? 'Désactiver' : 'Activer'}
-                            </Button>
+                      return (
+                        <Card key={offer.id} className="relative overflow-hidden border transition-all hover:shadow-md flex flex-col justify-between">
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                              {/* Interactive Offer Status Dropdown */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button className="inline-flex items-center gap-1.5 focus:outline-none group">
+                                    <Badge
+                                      variant="outline"
+                                      className={`cursor-pointer transition-all text-xs font-normal border py-0.5 px-2 ${offerStatusBadgeStyles[currentOfferStatus] || offerStatusBadgeStyles.active}`}
+                                    >
+                                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                                      {offerStatusLabels[currentOfferStatus] || 'Disponible'}
+                                      <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+                                    </Badge>
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start" className="w-48 text-xs">
+                                  <DropdownMenuItem onClick={() => handleUpdateCarrierOfferStatus(offer.id, 'active')}>
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 mr-2" />
+                                    Disponible (Active)
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleUpdateCarrierOfferStatus(offer.id, 'collecting')}>
+                                    <span className="h-2 w-2 rounded-full bg-amber-500 mr-2" />
+                                    Réception colis
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleUpdateCarrierOfferStatus(offer.id, 'in_transit')}>
+                                    <span className="h-2 w-2 rounded-full bg-blue-500 mr-2" />
+                                    En transit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleUpdateCarrierOfferStatus(offer.id, 'delivered')}>
+                                    <span className="h-2 w-2 rounded-full bg-slate-500 mr-2" />
+                                    Livrée / Terminée
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleUpdateCarrierOfferStatus(offer.id, 'closed')} className="text-rose-600">
+                                    <span className="h-2 w-2 rounded-full bg-rose-500 mr-2" />
+                                    Clôturer l'offre
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
 
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                                onClick={() => handleOpenEditOfferModal(offer)}
-                                title="Modifier"
-                              >
-                                <Edit className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteCarrierOffer(offer.id)}
-                                title="Supprimer"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              <span className="text-xs text-muted-foreground">
+                                {format(new Date(offer.departure_date), 'dd MMM yyyy', { locale: fr })}
+                              </span>
                             </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                            <CardTitle className="pt-2 text-base flex items-center gap-2">
+                              <CountryFlag country={offer.departure_country} flag={offer.departure_country_flag} size="sm" />
+                              <span>{offer.departure_city}</span>
+                              <Plane className="h-3.5 w-3.5 text-secondary rotate-45 mx-1" />
+                              <span>{offer.arrival_city}</span>
+                              <CountryFlag country={offer.arrival_country} flag={offer.arrival_country_flag} size="sm" />
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="grid grid-cols-2 gap-2 p-3 bg-muted/40 rounded-lg text-xs">
+                              <div>
+                                <p className="text-muted-foreground">Kilos disponibles</p>
+                                <p className="font-semibold text-sm text-foreground">
+                                  {offer.available_kilos} / {offer.total_kilos} kg
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-muted-foreground">Prix par kilo</p>
+                                <p className="font-semibold text-sm text-secondary">
+                                  {offer.price_per_kilo.toLocaleString()} FCFA
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Booked Parcels Preview directly on Offer Card */}
+                            <div className="pt-2 border-t border-border space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-1.5">
+                                  <Package className="h-3.5 w-3.5 text-secondary" />
+                                  <span className="font-medium text-foreground">
+                                    {offerBookings.length} colis réservé{offerBookings.length > 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                                {pendingBookings.length > 0 && (
+                                  <Badge variant="secondary" className="bg-amber-500/15 text-amber-600 border-amber-500/20 text-[10px] font-medium">
+                                    {pendingBookings.length} à réceptionner
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {offerBookings.length > 0 && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="w-full h-7 text-xs justify-between border-secondary/30 text-secondary hover:bg-secondary hover:text-white transition-colors"
+                                  onClick={() => setExpandedOfferId(expandedOfferId === offer.id ? null : offer.id)}
+                                >
+                                  <span>{expandedOfferId === offer.id ? 'Masquer les colis' : `Gérer les ${offerBookings.length} colis confiés`}</span>
+                                  {expandedOfferId === offer.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                </Button>
+                              )}
+
+                              {/* Expanded parcel list inside card */}
+                              {expandedOfferId === offer.id && offerBookings.length > 0 && (
+                                <div className="space-y-2 pt-2 border-t border-border/60">
+                                  {pendingBookings.length > 1 && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="w-full h-7 text-xs gap-1 border-emerald-500/30 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950 font-medium"
+                                      onClick={() => handleMarkAllBookingsReceivedForOffer(offer.id)}
+                                    >
+                                      <Check className="h-3 w-3" />
+                                      Tout marquer "Colis reçu" ({pendingBookings.length})
+                                    </Button>
+                                  )}
+
+                                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                    {offerBookings.map((b) => (
+                                      <div key={b.id} className="p-2 rounded bg-muted/40 border text-xs space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-mono font-bold text-foreground">{b.tracking_code}</span>
+                                            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 font-mono bg-background/80 px-1.5 py-0.5 rounded border border-border/50">
+                                              <Clock className="h-2.5 w-2.5 text-secondary" />
+                                              {format(new Date(b.created_at), "dd/MM à HH:mm")}
+                                            </span>
+                                          </div>
+                                          <Badge variant="outline" className={`text-[10px] py-0 px-1.5 border ${statusColors[b.status]}`}>
+                                            {statusLabels[b.status]}
+                                          </Badge>
+                                        </div>
+                                        <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                                          <span>{b.client_name || 'Client'} ({b.kilos_reserved} kg)</span>
+                                          {b.client_phone && (
+                                            <a
+                                              href={`https://wa.me/${b.client_phone.replace(/[^0-9]/g, '')}`}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-emerald-600 hover:underline flex items-center gap-0.5"
+                                            >
+                                              <MessageCircle className="h-2.5 w-2.5" /> WhatsApp
+                                            </a>
+                                          )}
+                                        </div>
+                                        {/* 1-Click Action Button for Carrier */}
+                                        <div className="pt-1 flex items-center gap-1">
+                                          {b.status === 'pending_submission' && (
+                                            <Button
+                                              size="sm"
+                                              className="w-full h-6 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white gap-1 font-medium"
+                                              disabled={quickUpdatingBookingId === b.id}
+                                              onClick={() => handleQuickUpdateBookingStatus(b.id, 'received_at_origin')}
+                                            >
+                                              <Check className="h-3 w-3" />
+                                              Signaler colis reçu
+                                            </Button>
+                                          )}
+                                          {b.status === 'received_at_origin' && (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="w-full h-6 text-[11px] text-blue-600 border-blue-500/30 gap-1 font-medium"
+                                              disabled={quickUpdatingBookingId === b.id}
+                                              onClick={() => handleQuickUpdateBookingStatus(b.id, 'in_transit')}
+                                            >
+                                              <Plane className="h-3 w-3" />
+                                              En transit
+                                            </Button>
+                                          )}
+                                          {b.status === 'in_transit' && (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="w-full h-6 text-[11px] text-indigo-600 border-indigo-500/30 gap-1 font-medium"
+                                              disabled={quickUpdatingBookingId === b.id}
+                                              onClick={() => handleQuickUpdateBookingStatus(b.id, 'arrived_at_destination')}
+                                            >
+                                              Arrivé
+                                            </Button>
+                                          )}
+                                          {b.status === 'arrived_at_destination' && (
+                                            <Button
+                                              size="sm"
+                                              className="w-full h-6 text-[11px] bg-success hover:bg-success/90 text-white gap-1 font-medium"
+                                              disabled={quickUpdatingBookingId === b.id}
+                                              onClick={() => handleQuickUpdateBookingStatus(b.id, 'delivered')}
+                                            >
+                                              <Check className="h-3 w-3" />
+                                              Marquer livré
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-2 border-t border-border gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs gap-1"
+                                onClick={() => handleToggleOfferActive(offer)}
+                              >
+                                {offer.is_active ? <ToggleRight className="h-4 w-4 text-success" /> : <ToggleLeft className="h-4 w-4" />}
+                                {offer.is_active ? 'Désactiver' : 'Activer'}
+                              </Button>
+
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={() => handleOpenEditOfferModal(offer)}
+                                  title="Modifier"
+                                >
+                                  <Edit className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteCarrierOffer(offer.id)}
+                                  title="Supprimer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
@@ -851,13 +1382,310 @@ export default function Dashboard() {
 
             {/* CARRIER TAB 2: Colis reçus / Réservations clients */}
             {isCarrier && (
-              <TabsContent value="carrier-bookings" className="space-y-6">
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground">Colis confiés par vos clients</h2>
-                  <p className="text-xs text-muted-foreground">
-                    Consultez la liste des expéditions réservées sur vos trajets et mettez à jour leur statut en temps réel
-                  </p>
+              <TabsContent value="carrier-bookings" className="space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                      <Package className="h-5 w-5 text-secondary" />
+                      Colis confiés par vos clients ({receivedBookings.length})
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Classez par ordre d'arrivée, filtrez par heures et signalez la réception en 1 clic
+                    </p>
+                  </div>
+
+                  {/* Search bar & quick toggle */}
+                  <div className="flex items-center gap-2 w-full md:w-auto">
+                    <div className="relative flex-1 md:w-72">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="text"
+                        placeholder="Rechercher code, client, tél..."
+                        value={bookingSearch}
+                        onChange={(e) => setBookingSearch(e.target.value)}
+                        className="h-9 pl-9 pr-8 text-xs"
+                      />
+                      {bookingSearch && (
+                        <button
+                          onClick={() => setBookingSearch('')}
+                          className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                          title="Effacer la recherche"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                    <Button
+                      variant={showAdvancedFilters ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-9 text-xs gap-1.5 shrink-0"
+                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                    >
+                      <SlidersHorizontal className="h-3.5 w-3.5" />
+                      Filtres {hasActiveBookingFilters && '•'}
+                    </Button>
+                  </div>
                 </div>
+
+                {/* Main Filter & Sort Toolbar */}
+                <Card className="bg-card/70 border-border/80 shadow-sm">
+                  <CardContent className="p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2.5 text-xs">
+                      {/* Sort: Ordre d'arrivée / Vol / Poids */}
+                      <div className="flex items-center gap-1.5 min-w-[210px] flex-1 sm:flex-initial">
+                        <ArrowUpDown className="h-3.5 w-3.5 text-secondary shrink-0" />
+                        <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Classer :</span>
+                        <Select value={bookingSortBy} onValueChange={(val: any) => setBookingSortBy(val)}>
+                          <SelectTrigger className="h-8 text-xs bg-background">
+                            <SelectValue placeholder="Ordre d'arrivée" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="arrival_desc" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-3.5 w-3.5 text-secondary" />
+                                <span>Arrivée : Plus récentes d'abord</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="arrival_asc" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <History className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>Arrivée : Premières arrivées (chronologique)</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="flight_asc" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Plane className="h-3.5 w-3.5 text-blue-500 rotate-45" />
+                                <span>Vol : Départs imminents d'abord</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="flight_desc" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Plane className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>Vol : Départs plus lointains</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="weight_desc" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Scale className="h-3.5 w-3.5 text-amber-500" />
+                                <span>Poids : Du plus lourd au plus léger</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="weight_asc" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Scale className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>Poids : Du plus léger au plus lourd</span>
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Hour filter: Tranches horaires d'arrivée */}
+                      <div className="flex items-center gap-1.5 min-w-[185px] flex-1 sm:flex-initial">
+                        <Clock className="h-3.5 w-3.5 text-secondary shrink-0" />
+                        <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Heures :</span>
+                        <Select value={bookingHourFilter} onValueChange={(val: any) => setBookingHourFilter(val)}>
+                          <SelectTrigger className="h-8 text-xs bg-background">
+                            <SelectValue placeholder="Toutes les heures" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>Toutes les heures</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="morning" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Sunrise className="h-3.5 w-3.5 text-amber-500" />
+                                <span>Matinée (06h - 12h)</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="afternoon" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Sun className="h-3.5 w-3.5 text-amber-500" />
+                                <span>Après-midi (12h - 18h)</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="evening" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Sunset className="h-3.5 w-3.5 text-orange-500" />
+                                <span>Soirée (18h - 00h)</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="night" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Moon className="h-3.5 w-3.5 text-indigo-400" />
+                                <span>Nuit (00h - 06h)</span>
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Date filter */}
+                      <div className="flex items-center gap-1.5 min-w-[165px] flex-1 sm:flex-initial">
+                        <Calendar className="h-3.5 w-3.5 text-secondary shrink-0" />
+                        <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Date :</span>
+                        <Select value={bookingDateFilter} onValueChange={(val: any) => setBookingDateFilter(val)}>
+                          <SelectTrigger className="h-8 text-xs bg-background">
+                            <SelectValue placeholder="Toutes les dates" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>Toutes les dates</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="today" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <CalendarCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                <span>Aujourd'hui</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="this_week" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <CalendarRange className="h-3.5 w-3.5 text-blue-500" />
+                                <span>7 derniers jours</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="custom" className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <CalendarDays className="h-3.5 w-3.5 text-secondary" />
+                                <span>Date spécifique...</span>
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Custom Date Input */}
+                      {bookingDateFilter === 'custom' && (
+                        <Input
+                          type="date"
+                          value={bookingCustomDate}
+                          onChange={(e) => setBookingCustomDate(e.target.value)}
+                          className="h-8 text-xs w-36 bg-background"
+                        />
+                      )}
+
+                      {/* Offer Route filter (if carrier has multiple offers) */}
+                      {carrierOffers.length > 0 && (
+                        <div className="flex items-center gap-1.5 min-w-[190px] flex-1 sm:flex-initial">
+                          <Plane className="h-3.5 w-3.5 text-secondary rotate-45 shrink-0" />
+                          <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Trajet :</span>
+                          <Select value={bookingOfferFilter} onValueChange={setBookingOfferFilter}>
+                            <SelectTrigger className="h-8 text-xs bg-background">
+                              <SelectValue placeholder="Tous les trajets" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all" className="text-xs">
+                                <div className="flex items-center gap-2">
+                                  <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span>Tous vos trajets</span>
+                                </div>
+                              </SelectItem>
+                              {carrierOffers.map((o) => (
+                                <SelectItem key={o.id} value={o.id} className="text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <Plane className="h-3.5 w-3.5 text-secondary rotate-45" />
+                                    <span>{o.departure_city} → {o.arrival_city} ({format(new Date(o.departure_date), 'dd/MM')})</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* Reset button if any filter active */}
+                      {hasActiveBookingFilters && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={resetBookingFilters}
+                          className="h-8 text-xs px-2 gap-1 text-muted-foreground hover:text-foreground ml-auto"
+                          title="Réinitialiser tous les filtres"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Effacer filtres
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Status Filter Chips */}
+                    <div className="pt-2 border-t border-border/50 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        <span className="text-muted-foreground mr-1">Statut :</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={`h-7 text-xs px-2.5 transition-colors ${
+                            filterBookingsStatus === 'all'
+                              ? 'bg-primary text-primary-foreground border-primary hover:bg-primary/90 hover:text-primary-foreground'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          onClick={() => setFilterBookingsStatus('all')}
+                        >
+                          Tous ({receivedBookings.length})
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={`h-7 text-xs px-2.5 transition-colors ${
+                            filterBookingsStatus === 'pending_submission'
+                              ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700 hover:text-white'
+                              : 'text-amber-700 border-amber-300 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-300'
+                          }`}
+                          onClick={() => setFilterBookingsStatus('pending_submission')}
+                        >
+                          À recevoir ({receivedBookings.filter(b => b.status === 'pending_submission').length})
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={`h-7 text-xs px-2.5 transition-colors ${
+                            filterBookingsStatus === 'received_at_origin'
+                              ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 hover:text-white'
+                              : 'text-emerald-700 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300'
+                          }`}
+                          onClick={() => setFilterBookingsStatus('received_at_origin')}
+                        >
+                          Colis reçus ({receivedBookings.filter(b => b.status === 'received_at_origin').length})
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={`h-7 text-xs px-2.5 transition-colors ${
+                            filterBookingsStatus === 'in_transit'
+                              ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:text-white'
+                              : 'text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300'
+                          }`}
+                          onClick={() => setFilterBookingsStatus('in_transit')}
+                        >
+                          En transit ({receivedBookings.filter(b => b.status === 'in_transit').length})
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={`h-7 text-xs px-2.5 transition-colors ${
+                            filterBookingsStatus === 'delivered'
+                              ? 'bg-slate-700 text-white border-slate-700 hover:bg-slate-800 hover:text-white dark:bg-slate-300 dark:text-slate-900'
+                              : 'text-slate-700 border-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/40 dark:text-slate-300'
+                          }`}
+                          onClick={() => setFilterBookingsStatus('delivered')}
+                        >
+                          Livrés ({receivedBookings.filter(b => b.status === 'delivered').length})
+                        </Button>
+                      </div>
+
+                      <div className="text-xs text-muted-foreground font-medium">
+                        {filteredAndSortedReceivedBookings.length} colis affiché{filteredAndSortedReceivedBookings.length > 1 ? 's' : ''} sur {receivedBookings.length}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
                 {receivedBookings.length === 0 ? (
                   <Card>
@@ -869,9 +1697,25 @@ export default function Dashboard() {
                       </p>
                     </CardContent>
                   </Card>
+                ) : filteredAndSortedReceivedBookings.length === 0 ? (
+                  <Card>
+                    <CardContent className="p-10 text-center space-y-3">
+                      <Filter className="h-10 w-10 mx-auto text-muted-foreground opacity-40" />
+                      <div>
+                        <h3 className="font-semibold text-foreground text-sm">Aucun colis ne correspond à vos filtres</h3>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Essayez de réinitialiser la recherche, l'heure ou la date pour afficher vos réservations.
+                        </p>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={resetBookingFilters} className="text-xs gap-1.5">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Réinitialiser tous les filtres
+                      </Button>
+                    </CardContent>
+                  </Card>
                 ) : (
                   <div className="space-y-4">
-                    {receivedBookings.map((booking) => (
+                    {filteredAndSortedReceivedBookings.map((booking) => (
                       <Card key={booking.id} className="hover:border-secondary/50 transition-colors">
                         <CardContent className="p-5">
                           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -880,7 +1724,7 @@ export default function Dashboard() {
                                 <span className="font-mono text-sm font-bold bg-muted px-2 py-0.5 rounded">
                                   {booking.tracking_code}
                                 </span>
-                                <Badge className={statusColors[booking.status]}>
+                                <Badge variant="outline" className={`border ${statusColors[booking.status]}`}>
                                   {statusLabels[booking.status]}
                                 </Badge>
                                 <span className="text-xs text-muted-foreground">
@@ -913,12 +1757,12 @@ export default function Dashboard() {
                               )}
                             </div>
 
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                               {booking.client_phone && (
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  className="text-xs gap-1 text-emerald-600 hover:text-emerald-700"
+                                  className="text-xs gap-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950 border-emerald-500/30"
                                   onClick={() => {
                                     const clean = booking.client_phone?.replace(/[^0-9]/g, '');
                                     const msg = `Bonjour ${booking.client_name}, je suis votre transporteur Kilotravel pour le colis ${booking.tracking_code}.`;
@@ -929,9 +1773,62 @@ export default function Dashboard() {
                                   WhatsApp Client
                                 </Button>
                               )}
+
+                              {/* Prominent 1-Click Action Button for Carrier */}
+                              {booking.status === 'pending_submission' && (
+                                <Button
+                                  size="sm"
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1 shadow-sm font-medium"
+                                  disabled={quickUpdatingBookingId === booking.id}
+                                  onClick={() => handleQuickUpdateBookingStatus(booking.id, 'received_at_origin')}
+                                  title="Signaler immédiatement la réception de ce colis"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  Signaler colis reçu
+                                </Button>
+                              )}
+
+                              {booking.status === 'received_at_origin' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs gap-1 text-blue-600 border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-950 font-medium"
+                                  disabled={quickUpdatingBookingId === booking.id}
+                                  onClick={() => handleQuickUpdateBookingStatus(booking.id, 'in_transit')}
+                                >
+                                  <Plane className="h-3.5 w-3.5" />
+                                  Passer en transit
+                                </Button>
+                              )}
+
+                              {booking.status === 'in_transit' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs gap-1 text-indigo-600 border-indigo-500/30 hover:bg-indigo-50 dark:hover:bg-indigo-950 font-medium"
+                                  disabled={quickUpdatingBookingId === booking.id}
+                                  onClick={() => handleQuickUpdateBookingStatus(booking.id, 'arrived_at_destination')}
+                                >
+                                  Arrivé à destination
+                                </Button>
+                              )}
+
+                              {booking.status === 'arrived_at_destination' && (
+                                <Button
+                                  size="sm"
+                                  className="bg-success hover:bg-success/90 text-white text-xs gap-1 font-medium"
+                                  disabled={quickUpdatingBookingId === booking.id}
+                                  onClick={() => handleQuickUpdateBookingStatus(booking.id, 'delivered')}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  Marquer livré
+                                </Button>
+                              )}
+
                               <Button
                                 size="sm"
-                                className="bg-secondary hover:bg-secondary/90 text-secondary-foreground text-xs gap-1"
+                                variant="outline"
+                                className="text-xs gap-1"
                                 onClick={() => handleOpenStatusModal(booking)}
                               >
                                 Modifier le statut
@@ -947,12 +1844,168 @@ export default function Dashboard() {
             )}
 
             {/* Reservations Tab (Mes envois de colis personnels) */}
-            <TabsContent value="reservations">
+            <TabsContent value="reservations" className="space-y-4">
+              {/* Search and Filter Toolbar for Client Reservations */}
+              {activeReservations.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-card p-3 rounded-lg border border-border">
+                  <div className="relative flex-1 min-w-[220px] max-w-sm">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Rechercher code de suivi, ville..."
+                      value={clientSearch}
+                      onChange={(e) => setClientSearch(e.target.value)}
+                      className="h-8 pl-9 pr-8 text-xs"
+                    />
+                    {clientSearch && (
+                      <button
+                        onClick={() => setClientSearch('')}
+                        className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    {/* Sort */}
+                    <div className="flex items-center gap-1.5">
+                      <ArrowUpDown className="h-3.5 w-3.5 text-secondary shrink-0" />
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">Classer :</span>
+                      <Select value={clientSortBy} onValueChange={(val: any) => setClientSortBy(val)}>
+                        <SelectTrigger className="h-8 text-xs w-44">
+                          <SelectValue placeholder="Ordre d'arrivée" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="arrival_desc" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-3.5 w-3.5 text-secondary" />
+                              <span>Récentes d'abord</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="arrival_asc" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <History className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>Premières réservations</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="flight_asc" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Plane className="h-3.5 w-3.5 text-blue-500 rotate-45" />
+                              <span>Départs de vols imminents</span>
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Hours */}
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5 text-secondary shrink-0" />
+                      <Select value={clientHourFilter} onValueChange={(val: any) => setClientHourFilter(val)}>
+                        <SelectTrigger className="h-8 text-xs w-36">
+                          <SelectValue placeholder="Heures" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>Toutes les heures</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="morning" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Sunrise className="h-3.5 w-3.5 text-amber-500" />
+                              <span>Matin (06h - 12h)</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="afternoon" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Sun className="h-3.5 w-3.5 text-amber-500" />
+                              <span>Après-midi (12h - 18h)</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="evening" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Sunset className="h-3.5 w-3.5 text-orange-500" />
+                              <span>Soirée (18h - 00h)</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="night" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Moon className="h-3.5 w-3.5 text-indigo-400" />
+                              <span>Nuit (00h - 06h)</span>
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Date */}
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="h-3.5 w-3.5 text-secondary shrink-0" />
+                      <Select value={clientDateFilter} onValueChange={(val: any) => setClientDateFilter(val)}>
+                        <SelectTrigger className="h-8 text-xs w-36">
+                          <SelectValue placeholder="Date" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>Toutes les dates</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="today" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <CalendarCheck className="h-3.5 w-3.5 text-emerald-500" />
+                              <span>Aujourd'hui</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="this_week" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <CalendarRange className="h-3.5 w-3.5 text-blue-500" />
+                              <span>7 derniers jours</span>
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {(clientSearch || clientDateFilter !== 'all' || clientHourFilter !== 'all' || clientSortBy !== 'arrival_desc') && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setClientSearch('');
+                          setClientDateFilter('all');
+                          setClientHourFilter('all');
+                          setClientSortBy('arrival_desc');
+                        }}
+                        className="h-8 text-xs px-2 gap-1 text-muted-foreground hover:text-foreground"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        Effacer
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {activeReservations.length > 0 ? (
                 <div className="grid lg:grid-cols-3 gap-6">
                   {/* Reservations List */}
                   <div className="lg:col-span-2 space-y-4">
-                    {activeReservations.map((reservation) => (
+                    {filteredAndSortedClientReservations.length === 0 ? (
+                      <Card>
+                        <CardContent className="p-8 text-center text-muted-foreground">
+                          <p className="text-sm">Aucune réservation ne correspond à votre recherche.</p>
+                          <Button size="sm" variant="ghost" onClick={() => setClientSearch('')} className="mt-2 text-xs">
+                            Effacer la recherche
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      filteredAndSortedClientReservations.map((reservation) => (
                       <Card
                         key={reservation.id}
                         className={`cursor-pointer transition-all hover:shadow-md ${
@@ -974,21 +2027,29 @@ export default function Dashboard() {
                               </div>
                             </div>
 
-                            <Badge className={statusColors[reservation.status]}>
+                            <Badge variant="outline" className={`border ${statusColors[reservation.status]}`}>
                               {statusLabels[reservation.status]}
                             </Badge>
                           </div>
 
-                          <div className="mt-3 flex items-center gap-6 text-sm text-muted-foreground">
-                            <span className="font-mono">{reservation.tracking_code}</span>
-                            <span>{reservation.kilos_reserved} kg</span>
-                            <span>
-                              {format(new Date(reservation.cargo_offers.departure_date), "d MMM yyyy", { locale: fr })}
-                            </span>
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground pt-2.5 border-t border-border/50">
+                            <div className="flex items-center gap-4">
+                              <span className="font-mono font-semibold text-foreground">{reservation.tracking_code}</span>
+                              <span className="font-medium text-foreground">{reservation.kilos_reserved} kg</span>
+                              <span className="flex items-center gap-1">
+                                <Plane className="h-3 w-3 text-secondary" />
+                                Vol le {format(new Date(reservation.cargo_offers.departure_date), "d MMM yyyy", { locale: fr })}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs text-foreground bg-muted/70 px-2 py-0.5 rounded font-mono font-medium">
+                              <Clock className="h-3 w-3 text-secondary" />
+                              <span>{format(new Date(reservation.created_at), "dd MMM yyyy à HH:mm", { locale: fr })}</span>
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
-                    ))}
+                    ))
+                  )}
                   </div>
 
                   {/* Selected Reservation Details */}
@@ -1351,6 +2412,40 @@ export default function Dashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Carrier Bulk Close Confirmation Dialog */}
+      <AlertDialog open={isBulkCloseOpen} onOpenChange={setIsBulkCloseOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <Lock className="h-5 w-5" />
+              Clôturer toutes vos offres actives ?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-sm">
+              <p>
+                Cette action va clôturer et masquer immédiatement vos{' '}
+                <strong>{carrierOffers.filter(o => o.is_active).length} annonce(s) de transport actives</strong> aux yeux des clients.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Aucun nouveau client ne pourra réserver de kilos sur ces annonces. Les réservations et colis déjà confiés restent visibles dans votre espace.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isClosingAll}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleCloseAllCarrierOffers();
+              }}
+              disabled={isClosingAll}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground font-medium"
+            >
+              {isClosingAll ? 'Clôture en cours...' : 'Confirmer la clôture de mes offres'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { 
   Package, Users, Plane, Plus, Edit, Trash2, 
-  ChevronDown, Search, ArrowUpDown, UserCheck, Clock, CheckCircle2, XCircle, ExternalLink, Bell, BellOff,
-  MessageCircle, Mail
+  ChevronDown, ChevronUp, Search, ArrowUpDown, UserCheck, Clock, CheckCircle2, XCircle, ExternalLink, Bell, BellOff,
+  MessageCircle, Mail, Phone, Lock, Boxes, Check, ArrowRight, Calendar, RotateCcw, SlidersHorizontal, Filter, X,
+  Sunrise, Sun, Sunset, Moon, CalendarCheck, CalendarRange, CalendarDays, Scale, History, MapPin
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -43,15 +60,34 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useNotifications } from '@/hooks/use-notifications';
 
-type ShipmentStatus = 
+export type ShipmentStatus = 
   | 'pending_submission'
   | 'received_at_origin'
   | 'in_transit'
   | 'arrived_at_destination'
   | 'delivered';
 
+export type OfferStatus = 'active' | 'collecting' | 'in_transit' | 'delivered' | 'closed';
+
+export const offerStatusLabels: Record<OfferStatus, string> = {
+  active: 'Disponible',
+  collecting: 'Réception colis',
+  in_transit: 'En transit',
+  delivered: 'Livrée / Terminée',
+  closed: 'Clôturée',
+};
+
+export const offerStatusBadgeStyles: Record<OfferStatus, string> = {
+  active: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-950/70',
+  collecting: 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 hover:text-amber-900 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-950/70',
+  in_transit: 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100 hover:text-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800 dark:hover:bg-blue-950/70',
+  delivered: 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700',
+  closed: 'bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100 hover:text-rose-900 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800 dark:hover:bg-rose-950/70',
+};
+
 interface CargoOffer {
   id: string;
+  user_id?: string | null;
   departure_city: string;
   departure_country: string;
   departure_country_flag: string;
@@ -63,6 +99,7 @@ interface CargoOffer {
   available_kilos: number;
   price_per_kilo: number;
   is_active: boolean;
+  status?: string | null;
 }
 
 interface Reservation {
@@ -104,11 +141,11 @@ const statusLabels: Record<ShipmentStatus, string> = {
 };
 
 const statusColors: Record<ShipmentStatus, string> = {
-  pending_submission: 'bg-warning text-warning-foreground',
-  received_at_origin: 'bg-info text-info-foreground',
-  in_transit: 'bg-secondary text-secondary-foreground',
-  arrived_at_destination: 'bg-info text-info-foreground',
-  delivered: 'bg-success text-success-foreground',
+  pending_submission: 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
+  received_at_origin: 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
+  in_transit: 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800',
+  arrived_at_destination: 'bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-800',
+  delivered: 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700',
 };
 
 const defaultOffer: Partial<CargoOffer> = {
@@ -145,6 +182,24 @@ export default function AdminDashboard() {
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [newStatus, setNewStatus] = useState<ShipmentStatus>('pending_submission');
+
+  // Bulk close and parcel status management states
+  const [isBulkCloseOpen, setIsBulkCloseOpen] = useState(false);
+  const [isClosingAll, setIsClosingAll] = useState(false);
+  const [filterOfferStatus, setFilterOfferStatus] = useState<string>('all');
+  const [filterReservationStatus, setFilterReservationStatus] = useState<string>('all');
+  const [quickUpdatingReservationId, setQuickUpdatingReservationId] = useState<string | null>(null);
+  const [expandedOfferId, setExpandedOfferId] = useState<string | null>(null);
+
+  // Advanced reservation filtering and sorting for admin/agent
+  const [resSortBy, setResSortBy] = useState<
+    'arrival_desc' | 'arrival_asc' | 'flight_asc' | 'flight_desc' | 'weight_desc' | 'weight_asc'
+  >('arrival_desc');
+  const [resSearch, setResSearch] = useState('');
+  const [resDateFilter, setResDateFilter] = useState<'all' | 'today' | 'this_week' | 'custom'>('all');
+  const [resCustomDate, setResCustomDate] = useState('');
+  const [resHourFilter, setResHourFilter] = useState<'all' | 'morning' | 'afternoon' | 'evening' | 'night'>('all');
+  const [resOfferFilter, setResOfferFilter] = useState<string>('all');
 
   // Carrier approval notification modal
   const [notifyModalOpen, setNotifyModalOpen] = useState(false);
@@ -450,7 +505,7 @@ export default function AdminDashboard() {
       if (newStatus === 'delivered' && selectedReservation.cargo_offer_id) {
         await supabase
           .from('cargo_offers')
-          .update({ is_active: false })
+          .update({ is_active: false, status: 'delivered' })
           .eq('id', selectedReservation.cargo_offer_id);
       }
 
@@ -469,6 +524,132 @@ export default function AdminDashboard() {
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleUpdateOfferStatus = async (offerId: string, nextStatus: OfferStatus) => {
+    try {
+      const isActive = nextStatus === 'active' || nextStatus === 'collecting';
+      const { error } = await supabase
+        .from('cargo_offers')
+        .update({
+          status: nextStatus,
+          is_active: isActive,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', offerId);
+
+      if (error) throw error;
+      toast({
+        title: 'Statut de l\'offre mis à jour',
+        description: `L'offre est désormais "${offerStatusLabels[nextStatus]}".`,
+      });
+      fetchData();
+    } catch (error: any) {
+      toast({
+        title: 'Erreur',
+        description: error.message || 'Impossible de mettre à jour le statut.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCloseAllActiveOffers = async () => {
+    setIsClosingAll(true);
+    try {
+      let closedCount = 0;
+      const { data: rpcCount, error: rpcError } = await supabase.rpc('close_all_active_offers');
+
+      if (!rpcError && typeof rpcCount === 'number') {
+        closedCount = rpcCount;
+      } else {
+        const { data, error } = await supabase
+          .from('cargo_offers')
+          .update({
+            is_active: false,
+            status: 'closed',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('is_active', true)
+          .select();
+
+        if (error) throw error;
+        closedCount = data?.length || 0;
+      }
+
+      toast({
+        title: 'Offres clôturées avec succès',
+        description: `${closedCount} offre(s) active(s) ont été clôturées et masquées aux clients.`,
+      });
+      setIsBulkCloseOpen(false);
+      fetchData();
+    } catch (error: any) {
+      toast({
+        title: 'Erreur lors de la clôture',
+        description: error.message || 'Impossible de clôturer toutes les offres.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsClosingAll(false);
+    }
+  };
+
+  const handleQuickUpdateReservationStatus = async (reservationId: string, nextStatus: ShipmentStatus) => {
+    setQuickUpdatingReservationId(reservationId);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('reservations')
+        .update({
+          status: nextStatus,
+          status_updated_at: now,
+        })
+        .eq('id', reservationId);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Statut du colis mis à jour',
+        description: `Passé à "${statusLabels[nextStatus]}".`,
+      });
+      fetchData();
+    } catch (error: any) {
+      toast({
+        title: 'Erreur',
+        description: error.message || 'Impossible de mettre à jour le statut.',
+        variant: 'destructive',
+      });
+    } finally {
+      setQuickUpdatingReservationId(null);
+    }
+  };
+
+  const handleMarkAllParcelsReceivedForOffer = async (offerId: string) => {
+    try {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('reservations')
+        .update({
+          status: 'received_at_origin',
+          status_updated_at: now,
+        })
+        .eq('cargo_offer_id', offerId)
+        .eq('status', 'pending_submission')
+        .select();
+
+      if (error) throw error;
+      const count = data?.length || 0;
+      toast({
+        title: 'Colis réceptionnés',
+        description: `${count} colis de cette offre ont été passés au statut "Colis reçu".`,
+      });
+      fetchData();
+    } catch (error: any) {
+      toast({
+        title: 'Erreur',
+        description: error.message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -579,71 +760,325 @@ export default function AdminDashboard() {
             </TabsList>
 
             {/* Offers Tab */}
-            <TabsContent value="offers">
+            <TabsContent value="offers" className="space-y-4">
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>Offres de fret</CardTitle>
-                  <Button onClick={() => handleOpenOfferModal()} className="bg-secondary text-secondary-foreground">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Nouvelle offre
-                  </Button>
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Plane className="h-5 w-5 text-secondary" />
+                      Offres de fret ({offers.length})
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {offers.filter(o => o.is_active).length} disponible(s) aux clients • {offers.filter(o => !o.is_active).length} clôturée(s)
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground gap-1.5 text-xs font-medium"
+                      disabled={offers.filter(o => o.is_active).length === 0 || isClosingAll}
+                      onClick={() => setIsBulkCloseOpen(true)}
+                      title="Clôturer et masquer toutes les offres actives"
+                    >
+                      <Lock className="h-3.5 w-3.5" />
+                      Clôturer toutes les offres disponibles ({offers.filter(o => o.is_active).length})
+                    </Button>
+                    <Button onClick={() => handleOpenOfferModal()} size="sm" className="bg-secondary text-secondary-foreground gap-1.5 text-xs">
+                      <Plus className="h-4 w-4" />
+                      Nouvelle offre
+                    </Button>
+                  </div>
                 </CardHeader>
-                <CardContent>
+
+                {/* Offer Status Filter Pills */}
+                <div className="px-6 pb-3 pt-1 flex flex-wrap gap-1.5 items-center border-b border-border/50 text-xs">
+                  <span className="text-muted-foreground text-xs mr-1">Filtrer :</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`h-7 text-xs px-2.5 transition-colors ${
+                      filterOfferStatus === 'all'
+                        ? 'bg-primary text-primary-foreground border-primary hover:bg-primary/90 hover:text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    onClick={() => setFilterOfferStatus('all')}
+                  >
+                    Toutes ({offers.length})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`h-7 text-xs px-2.5 transition-colors ${
+                      filterOfferStatus === 'active'
+                        ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 hover:text-white'
+                        : 'text-emerald-700 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300'
+                    }`}
+                    onClick={() => setFilterOfferStatus('active')}
+                  >
+                    Disponibles ({offers.filter(o => o.is_active && (!o.status || o.status === 'active')).length})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`h-7 text-xs px-2.5 transition-colors ${
+                      filterOfferStatus === 'collecting'
+                        ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700 hover:text-white'
+                        : 'text-amber-700 border-amber-300 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-300'
+                    }`}
+                    onClick={() => setFilterOfferStatus('collecting')}
+                  >
+                    Réception colis ({offers.filter(o => o.status === 'collecting').length})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`h-7 text-xs px-2.5 transition-colors ${
+                      filterOfferStatus === 'in_transit'
+                        ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:text-white'
+                        : 'text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300'
+                    }`}
+                    onClick={() => setFilterOfferStatus('in_transit')}
+                  >
+                    En transit ({offers.filter(o => o.status === 'in_transit').length})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`h-7 text-xs px-2.5 transition-colors ${
+                      filterOfferStatus === 'closed'
+                        ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700 hover:text-white'
+                        : 'text-rose-700 border-rose-300 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:text-rose-300'
+                    }`}
+                    onClick={() => setFilterOfferStatus('closed')}
+                  >
+                    Clôturées ({offers.filter(o => !o.is_active || o.status === 'closed').length})
+                  </Button>
+                </div>
+
+                <CardContent className="p-0">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Trajet</TableHead>
-                        <TableHead>Date</TableHead>
+                        <TableHead>Date départ</TableHead>
                         <TableHead>Kilos</TableHead>
                         <TableHead>Prix/kg</TableHead>
-                        <TableHead>Statut</TableHead>
+                        <TableHead>Statut trajet</TableHead>
+                        <TableHead>Colis réservés</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {offers.map((offer) => (
-                        <TableRow key={offer.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <CountryFlag country={offer.departure_country} flag={offer.departure_country_flag} size="sm" />
-                              <span>{offer.departure_city}</span>
-                              <span className="text-muted-foreground">→</span>
-                              <span>{offer.arrival_city}</span>
-                              <CountryFlag country={offer.arrival_country} flag={offer.arrival_country_flag} size="sm" />
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {format(new Date(offer.departure_date), "d MMM yyyy", { locale: fr })}
-                          </TableCell>
-                          <TableCell>
-                            {offer.available_kilos}/{offer.total_kilos} kg
-                          </TableCell>
-                          <TableCell>
-                            {offer.price_per_kilo.toLocaleString('fr-FR')} FCFA
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={offer.is_active ? 'default' : 'secondary'}>
-                              {offer.is_active ? 'Active' : 'Inactive'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleOpenOfferModal(offer)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteOffer(offer.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {offers
+                        .filter((offer) => {
+                          if (filterOfferStatus === 'all') return true;
+                          if (filterOfferStatus === 'active') return offer.is_active && (!offer.status || offer.status === 'active');
+                          if (filterOfferStatus === 'closed') return !offer.is_active || offer.status === 'closed';
+                          return offer.status === filterOfferStatus;
+                        })
+                        .map((offer) => {
+                          const offerReservations = reservations.filter(r => r.cargo_offer_id === offer.id);
+                          const pendingReservations = offerReservations.filter(r => r.status === 'pending_submission');
+                          const currentOfferStatus = ((offer.status as OfferStatus) || (offer.is_active ? 'active' : 'closed')) as OfferStatus;
+
+                          return (
+                            <>
+                              <TableRow key={offer.id} className={expandedOfferId === offer.id ? 'bg-muted/30' : ''}>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <CountryFlag country={offer.departure_country} flag={offer.departure_country_flag} size="sm" />
+                                    <span className="font-medium">{offer.departure_city}</span>
+                                    <span className="text-muted-foreground">→</span>
+                                    <span className="font-medium">{offer.arrival_city}</span>
+                                    <CountryFlag country={offer.arrival_country} flag={offer.arrival_country_flag} size="sm" />
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {format(new Date(offer.departure_date), "d MMM yyyy", { locale: fr })}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="text-xs">
+                                    <span className="font-semibold">{offer.available_kilos}</span>
+                                    <span className="text-muted-foreground"> / {offer.total_kilos} kg</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {offer.price_per_kilo.toLocaleString('fr-FR')} FCFA
+                                </TableCell>
+                                <TableCell>
+                                  {/* Interactive Offer Status Dropdown */}
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button className="inline-flex items-center gap-1.5 focus:outline-none group">
+                                        <Badge
+                                          variant="outline"
+                                          className={`cursor-pointer transition-all text-xs font-normal border py-0.5 px-2 ${offerStatusBadgeStyles[currentOfferStatus] || offerStatusBadgeStyles.active}`}
+                                        >
+                                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                                          {offerStatusLabels[currentOfferStatus] || 'Disponible'}
+                                          <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+                                        </Badge>
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start" className="w-48 text-xs">
+                                      <DropdownMenuItem onClick={() => handleUpdateOfferStatus(offer.id, 'active')}>
+                                        <span className="h-2 w-2 rounded-full bg-emerald-500 mr-2" />
+                                        Disponible (Active)
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleUpdateOfferStatus(offer.id, 'collecting')}>
+                                        <span className="h-2 w-2 rounded-full bg-amber-500 mr-2" />
+                                        Réception colis
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleUpdateOfferStatus(offer.id, 'in_transit')}>
+                                        <span className="h-2 w-2 rounded-full bg-blue-500 mr-2" />
+                                        En transit
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleUpdateOfferStatus(offer.id, 'delivered')}>
+                                        <span className="h-2 w-2 rounded-full bg-slate-500 mr-2" />
+                                        Livrée / Terminée
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleUpdateOfferStatus(offer.id, 'closed')} className="text-rose-600">
+                                        <span className="h-2 w-2 rounded-full bg-rose-500 mr-2" />
+                                        Clôturer l'offre
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="text-xs">
+                                      {offerReservations.length} colis ({offerReservations.reduce((acc, r) => acc + r.kilos_reserved, 0)} kg)
+                                    </Badge>
+                                    {pendingReservations.length > 0 && (
+                                      <Badge variant="secondary" className="bg-amber-500/15 text-amber-600 border-amber-500/20 text-[10px]">
+                                        {pendingReservations.length} à réceptionner
+                                      </Badge>
+                                    )}
+                                    {offerReservations.length > 0 && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-xs px-2.5 gap-1 border-secondary/30 text-secondary hover:bg-secondary hover:text-white transition-colors"
+                                        onClick={() => setExpandedOfferId(expandedOfferId === offer.id ? null : offer.id)}
+                                      >
+                                        {expandedOfferId === offer.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                        {expandedOfferId === offer.id ? 'Masquer' : 'Voir'}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleOpenOfferModal(offer)}
+                                      title="Modifier"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleDeleteOffer(offer.id)}
+                                      title="Supprimer"
+                                    >
+                                      <Trash2 className="h-4 w-4 text-destructive" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+
+                              {/* Expandable row: View & update parcels booked for this offer */}
+                              {expandedOfferId === offer.id && offerReservations.length > 0 && (
+                                <TableRow key={`${offer.id}-expanded`} className="bg-muted/20 border-y border-border">
+                                  <TableCell colSpan={7} className="p-4">
+                                    <div className="space-y-3">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <Package className="h-4 w-4 text-secondary" />
+                                          <span className="font-semibold text-xs text-foreground">
+                                            Colis confiés pour ce trajet ({offerReservations.length})
+                                          </span>
+                                        </div>
+                                        {pendingReservations.length > 0 && (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-xs gap-1 border-emerald-500/30 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+                                            onClick={() => handleMarkAllParcelsReceivedForOffer(offer.id)}
+                                          >
+                                            <Check className="h-3.5 w-3.5" />
+                                            Tout marquer comme "Colis reçu" ({pendingReservations.length})
+                                          </Button>
+                                        )}
+                                      </div>
+
+                                      <div className="grid gap-2">
+                                        {offerReservations.map((r) => (
+                                          <div
+                                            key={r.id}
+                                            className="flex flex-wrap items-center justify-between gap-3 p-2.5 rounded bg-background border text-xs"
+                                          >
+                                            <div className="flex items-center gap-3 flex-wrap">
+                                              <span className="font-mono font-bold bg-muted px-2 py-0.5 rounded">
+                                                {r.tracking_code}
+                                              </span>
+                                              <span>Client : <strong>{r.profiles?.full_name || 'Client'}</strong></span>
+                                              <span>Poids : <strong>{r.kilos_reserved} kg</strong></span>
+                                              <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono bg-muted/60 px-1.5 py-0.5 rounded">
+                                                <Clock className="h-3 w-3 text-secondary" />
+                                                {format(new Date(r.created_at), "dd/MM à HH:mm")}
+                                              </span>
+                                              <Badge variant="outline" className={`border ${statusColors[r.status]}`}>
+                                                {statusLabels[r.status]}
+                                              </Badge>
+                                            </div>
+
+                                            <div className="flex items-center gap-2">
+                                              {r.status === 'pending_submission' && (
+                                                <Button
+                                                  size="sm"
+                                                  className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                                                  disabled={quickUpdatingReservationId === r.id}
+                                                  onClick={() => handleQuickUpdateReservationStatus(r.id, 'received_at_origin')}
+                                                >
+                                                  <Check className="h-3 w-3" />
+                                                  Signaler colis reçu
+                                                </Button>
+                                              )}
+                                              {r.status === 'received_at_origin' && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  className="h-7 text-xs text-blue-600 border-blue-500/30 gap-1"
+                                                  disabled={quickUpdatingReservationId === r.id}
+                                                  onClick={() => handleQuickUpdateReservationStatus(r.id, 'in_transit')}
+                                                >
+                                                  <Plane className="h-3 w-3" />
+                                                  En transit
+                                                </Button>
+                                              )}
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 text-xs"
+                                                onClick={() => handleOpenStatusModal(r)}
+                                              >
+                                                Modifier statut
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </>
+                          );
+                        })}
                     </TableBody>
                   </Table>
                 </CardContent>
@@ -651,12 +1086,334 @@ export default function AdminDashboard() {
             </TabsContent>
 
             {/* Reservations Tab */}
-            <TabsContent value="reservations">
+            <TabsContent value="reservations" className="space-y-4">
               <Card>
-                <CardHeader>
-                  <CardTitle>Réservations</CardTitle>
+                <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Package className="h-5 w-5 text-secondary" />
+                      Toutes les réservations ({reservations.length})
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Gestion, tri chronologique par ordre d'arrivée, filtre par heures et suivi des colis clients
+                    </p>
+                  </div>
+
+                  {/* Search bar */}
+                  <div className="relative w-full md:w-80">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Rechercher code, client, téléphone, trajet..."
+                      value={resSearch}
+                      onChange={(e) => setResSearch(e.target.value)}
+                      className="h-9 pl-9 pr-8 text-xs"
+                    />
+                    {resSearch && (
+                      <button
+                        onClick={() => setResSearch('')}
+                        className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </CardHeader>
-                <CardContent>
+
+                {/* Filter and Sort Toolbar */}
+                <div className="px-6 py-3 bg-muted/30 border-y border-border/50 flex flex-wrap items-center gap-2.5 text-xs">
+                  {/* Sort: Ordre d'arrivée / Vol / Poids */}
+                  <div className="flex items-center gap-1.5 min-w-[210px] flex-1 sm:flex-initial">
+                    <ArrowUpDown className="h-3.5 w-3.5 text-secondary shrink-0" />
+                    <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Classer :</span>
+                    <Select value={resSortBy} onValueChange={(val: any) => setResSortBy(val)}>
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue placeholder="Ordre d'arrivée" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="arrival_desc" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3.5 w-3.5 text-secondary" />
+                            <span>Arrivée : Plus récentes d'abord</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="arrival_asc" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <History className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Arrivée : Premières réservées (chronologique)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="flight_asc" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Plane className="h-3.5 w-3.5 text-blue-500 rotate-45" />
+                            <span>Vol : Départs imminents d'abord</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="flight_desc" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Plane className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Vol : Départs plus lointains</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="weight_desc" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Scale className="h-3.5 w-3.5 text-amber-500" />
+                            <span>Poids : Du plus lourd au plus léger</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="weight_asc" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Scale className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Poids : Du plus léger au plus lourd</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Hour filter: Tranches horaires */}
+                  <div className="flex items-center gap-1.5 min-w-[185px] flex-1 sm:flex-initial">
+                    <Clock className="h-3.5 w-3.5 text-secondary shrink-0" />
+                    <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Heures :</span>
+                    <Select value={resHourFilter} onValueChange={(val: any) => setResHourFilter(val)}>
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue placeholder="Toutes les heures" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Toutes les heures</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="morning" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Sunrise className="h-3.5 w-3.5 text-amber-500" />
+                            <span>Matinée (06h - 12h)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="afternoon" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Sun className="h-3.5 w-3.5 text-amber-500" />
+                            <span>Après-midi (12h - 18h)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="evening" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Sunset className="h-3.5 w-3.5 text-orange-500" />
+                            <span>Soirée (18h - 00h)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="night" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Moon className="h-3.5 w-3.5 text-indigo-400" />
+                            <span>Nuit (00h - 06h)</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Date filter */}
+                  <div className="flex items-center gap-1.5 min-w-[165px] flex-1 sm:flex-initial">
+                    <Calendar className="h-3.5 w-3.5 text-secondary shrink-0" />
+                    <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Date :</span>
+                    <Select value={resDateFilter} onValueChange={(val: any) => setResDateFilter(val)}>
+                      <SelectTrigger className="h-8 text-xs bg-background">
+                        <SelectValue placeholder="Toutes les dates" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>Toutes les dates</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="today" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <CalendarCheck className="h-3.5 w-3.5 text-emerald-500" />
+                            <span>Aujourd'hui</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="this_week" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <CalendarRange className="h-3.5 w-3.5 text-blue-500" />
+                            <span>7 derniers jours</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="custom" className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <CalendarDays className="h-3.5 w-3.5 text-secondary" />
+                            <span>Date spécifique...</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Custom Date Input */}
+                  {resDateFilter === 'custom' && (
+                    <Input
+                      type="date"
+                      value={resCustomDate}
+                      onChange={(e) => setResCustomDate(e.target.value)}
+                      className="h-8 text-xs w-36 bg-background"
+                    />
+                  )}
+
+                  {/* Offer Filter */}
+                  {offers.length > 0 && (
+                    <div className="flex items-center gap-1.5 min-w-[185px] flex-1 sm:flex-initial">
+                      <Plane className="h-3.5 w-3.5 text-secondary rotate-45 shrink-0" />
+                      <span className="text-muted-foreground text-xs whitespace-nowrap font-medium">Trajet :</span>
+                      <Select value={resOfferFilter} onValueChange={setResOfferFilter}>
+                        <SelectTrigger className="h-8 text-xs bg-background">
+                          <SelectValue placeholder="Tous les trajets" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>Tous les trajets</span>
+                            </div>
+                          </SelectItem>
+                          {offers.map((o) => (
+                            <SelectItem key={o.id} value={o.id} className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <Plane className="h-3.5 w-3.5 text-secondary rotate-45" />
+                                <span>{o.departure_city} → {o.arrival_city} ({format(new Date(o.departure_date), 'dd/MM')})</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Reset button */}
+                  {(filterReservationStatus !== 'all' || resSearch.trim() || resDateFilter !== 'all' || resHourFilter !== 'all' || resOfferFilter !== 'all' || resSortBy !== 'arrival_desc') && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setFilterReservationStatus('all');
+                        setResSearch('');
+                        setResDateFilter('all');
+                        setResCustomDate('');
+                        setResHourFilter('all');
+                        setResOfferFilter('all');
+                        setResSortBy('arrival_desc');
+                      }}
+                      className="h-8 text-xs px-2 gap-1 text-muted-foreground hover:text-foreground ml-auto"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Effacer filtres
+                    </Button>
+                  )}
+                </div>
+
+                {/* Reservation Status Filter Pills */}
+                <div className="px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-border/50 text-xs">
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    <span className="text-muted-foreground text-xs mr-1">Statut :</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 text-xs px-2.5 transition-colors ${
+                        filterReservationStatus === 'all'
+                          ? 'bg-primary text-primary-foreground border-primary hover:bg-primary/90 hover:text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      onClick={() => setFilterReservationStatus('all')}
+                    >
+                      Toutes ({reservations.length})
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 text-xs px-2.5 transition-colors ${
+                        filterReservationStatus === 'pending_submission'
+                          ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700 hover:text-white'
+                          : 'text-amber-700 border-amber-300 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:text-amber-300'
+                      }`}
+                      onClick={() => setFilterReservationStatus('pending_submission')}
+                    >
+                      En attente ({reservations.filter(r => r.status === 'pending_submission').length})
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 text-xs px-2.5 transition-colors ${
+                        filterReservationStatus === 'received_at_origin'
+                          ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 hover:text-white'
+                          : 'text-emerald-700 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300'
+                      }`}
+                      onClick={() => setFilterReservationStatus('received_at_origin')}
+                    >
+                      Colis reçus ({reservations.filter(r => r.status === 'received_at_origin').length})
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 text-xs px-2.5 transition-colors ${
+                        filterReservationStatus === 'in_transit'
+                          ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:text-white'
+                          : 'text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300'
+                      }`}
+                      onClick={() => setFilterReservationStatus('in_transit')}
+                    >
+                      En transit ({reservations.filter(r => r.status === 'in_transit').length})
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 text-xs px-2.5 transition-colors ${
+                        filterReservationStatus === 'delivered'
+                          ? 'bg-slate-700 text-white border-slate-700 hover:bg-slate-800 hover:text-white dark:bg-slate-300 dark:text-slate-900'
+                          : 'text-slate-700 border-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/40 dark:text-slate-300'
+                      }`}
+                      onClick={() => setFilterReservationStatus('delivered')}
+                    >
+                      Livrés ({reservations.filter(r => r.status === 'delivered').length})
+                    </Button>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground font-medium">
+                    {reservations
+                      .filter((r) => {
+                        if (filterReservationStatus !== 'all' && r.status !== filterReservationStatus) return false;
+                        if (resOfferFilter !== 'all' && r.offer_id !== resOfferFilter) return false;
+                        if (resSearch.trim()) {
+                          const q = resSearch.toLowerCase().trim();
+                          const code = (r.tracking_code || '').toLowerCase();
+                          const client = (r.profiles?.full_name || '').toLowerCase();
+                          const phone = (r.profiles?.phone_number || '').toLowerCase();
+                          const dep = (r.cargo_offers?.departure_city || '').toLowerCase();
+                          const arr = (r.cargo_offers?.arrival_city || '').toLowerCase();
+                          if (!code.includes(q) && !client.includes(q) && !phone.includes(q) && !dep.includes(q) && !arr.includes(q)) return false;
+                        }
+                        const d = new Date(r.created_at);
+                        if (resDateFilter === 'today') {
+                          const now = new Date();
+                          if (d.getDate() !== now.getDate() || d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
+                        } else if (resDateFilter === 'this_week') {
+                          if (d.getTime() < Date.now() - 7 * 86400000) return false;
+                        } else if (resDateFilter === 'custom' && resCustomDate) {
+                          if (format(d, 'yyyy-MM-dd') !== resCustomDate) return false;
+                        }
+                        if (resHourFilter !== 'all') {
+                          const h = d.getHours();
+                          if (resHourFilter === 'morning' && (h < 6 || h >= 12)) return false;
+                          if (resHourFilter === 'afternoon' && (h < 12 || h >= 18)) return false;
+                          if (resHourFilter === 'evening' && (h < 18 || h >= 24)) return false;
+                          if (resHourFilter === 'night' && h >= 6) return false;
+                        }
+                        return true;
+                      }).length} réservation(s) affichée(s) sur {reservations.length}
+                  </div>
+                </div>
+
+                <CardContent className="p-0">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -665,42 +1422,122 @@ export default function AdminDashboard() {
                         <TableHead>Trajet</TableHead>
                         <TableHead>Kilos</TableHead>
                         <TableHead>Statut</TableHead>
-                        <TableHead>Date</TableHead>
+                        <TableHead>Date & Heure d'arrivée</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {reservations.map((reservation) => (
-                        <TableRow key={reservation.id}>
-                          <TableCell className="font-mono text-sm">
-                            {reservation.tracking_code}
-                          </TableCell>
-                          <TableCell>
-                            {reservation.profiles?.full_name || 'N/A'}
-                          </TableCell>
-                          <TableCell>
-                            {reservation.cargo_offers.departure_city} → {reservation.cargo_offers.arrival_city}
-                          </TableCell>
-                          <TableCell>{reservation.kilos_reserved} kg</TableCell>
-                          <TableCell>
-                            <Badge className={statusColors[reservation.status]}>
-                              {statusLabels[reservation.status]}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {format(new Date(reservation.created_at), "d MMM yyyy", { locale: fr })}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleOpenStatusModal(reservation)}
-                            >
-                              Modifier statut
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {reservations
+                        .filter((reservation) => {
+                          if (filterReservationStatus !== 'all' && reservation.status !== filterReservationStatus) return false;
+                          if (resOfferFilter !== 'all' && reservation.offer_id !== resOfferFilter) return false;
+                          if (resSearch.trim()) {
+                            const q = resSearch.toLowerCase().trim();
+                            const code = (reservation.tracking_code || '').toLowerCase();
+                            const client = (reservation.profiles?.full_name || '').toLowerCase();
+                            const phone = (reservation.profiles?.phone_number || '').toLowerCase();
+                            const dep = (reservation.cargo_offers?.departure_city || '').toLowerCase();
+                            const arr = (reservation.cargo_offers?.arrival_city || '').toLowerCase();
+                            if (!code.includes(q) && !client.includes(q) && !phone.includes(q) && !dep.includes(q) && !arr.includes(q)) return false;
+                          }
+                          const d = new Date(reservation.created_at);
+                          if (resDateFilter === 'today') {
+                            const now = new Date();
+                            if (d.getDate() !== now.getDate() || d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
+                          } else if (resDateFilter === 'this_week') {
+                            if (d.getTime() < Date.now() - 7 * 86400000) return false;
+                          } else if (resDateFilter === 'custom' && resCustomDate) {
+                            if (format(d, 'yyyy-MM-dd') !== resCustomDate) return false;
+                          }
+                          if (resHourFilter !== 'all') {
+                            const h = d.getHours();
+                            if (resHourFilter === 'morning' && (h < 6 || h >= 12)) return false;
+                            if (resHourFilter === 'afternoon' && (h < 12 || h >= 18)) return false;
+                            if (resHourFilter === 'evening' && (h < 18 || h >= 24)) return false;
+                            if (resHourFilter === 'night' && h >= 6) return false;
+                          }
+                          return true;
+                        })
+                        .sort((a, b) => {
+                          if (resSortBy === 'arrival_desc') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                          if (resSortBy === 'arrival_asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                          if (resSortBy === 'flight_asc') return new Date(a.cargo_offers.departure_date).getTime() - new Date(b.cargo_offers.departure_date).getTime();
+                          if (resSortBy === 'flight_desc') return new Date(b.cargo_offers.departure_date).getTime() - new Date(a.cargo_offers.departure_date).getTime();
+                          if (resSortBy === 'weight_desc') return b.kilos_reserved - a.kilos_reserved;
+                          if (resSortBy === 'weight_asc') return a.kilos_reserved - b.kilos_reserved;
+                          return 0;
+                        })
+                        .map((reservation) => (
+                          <TableRow key={reservation.id}>
+                            <TableCell className="font-mono text-sm font-semibold">
+                              {reservation.tracking_code}
+                            </TableCell>
+                            <TableCell>
+                              <div>
+                                <span className="font-medium text-foreground">{reservation.profiles?.full_name || 'Client'}</span>
+                                {reservation.profiles?.phone_number && (
+                                  <p className="text-[11px] text-muted-foreground">{reservation.profiles?.phone_number}</p>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {reservation.cargo_offers.departure_city} → {reservation.cargo_offers.arrival_city}
+                            </TableCell>
+                            <TableCell>{reservation.kilos_reserved} kg</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`border ${statusColors[reservation.status]}`}>
+                                {statusLabels[reservation.status]}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col text-xs space-y-0.5">
+                                <span className="font-medium text-foreground whitespace-nowrap">
+                                  {format(new Date(reservation.created_at), "dd MMM yyyy", { locale: fr })}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
+                                  <Clock className="h-3 w-3 text-secondary" />
+                                  {format(new Date(reservation.created_at), "HH:mm")}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {reservation.status === 'pending_submission' && (
+                                  <Button
+                                    size="sm"
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7 px-2.5 gap-1"
+                                    disabled={quickUpdatingReservationId === reservation.id}
+                                    onClick={() => handleQuickUpdateReservationStatus(reservation.id, 'received_at_origin')}
+                                    title="Marquer ce colis comme reçu"
+                                  >
+                                    <Check className="h-3 w-3" />
+                                    Colis reçu
+                                  </Button>
+                                )}
+                                {reservation.status === 'received_at_origin' && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-xs h-7 px-2.5 gap-1 text-blue-600 border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-950"
+                                    disabled={quickUpdatingReservationId === reservation.id}
+                                    onClick={() => handleQuickUpdateReservationStatus(reservation.id, 'in_transit')}
+                                  >
+                                    <Plane className="h-3 w-3" />
+                                    En transit
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => handleOpenStatusModal(reservation)}
+                                >
+                                  Modifier statut
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
                     </TableBody>
                   </Table>
                 </CardContent>
@@ -743,10 +1580,10 @@ export default function AdminDashboard() {
                               )}
                             </div>
                             <div className="text-sm text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
-                              <span>📞 {app.phone_number}</span>
-                              {app.email && <span>✉️ {app.email}</span>}
-                              <span>📍 {app.city}</span>
-                              {app.preferred_routes && <span>✈️ {app.preferred_routes}</span>}
+                              <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> {app.phone_number}</span>
+                              {app.email && <span className="inline-flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" /> {app.email}</span>}
+                              <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" /> {app.city}</span>
+                              {app.preferred_routes && <span className="inline-flex items-center gap-1.5"><Plane className="h-3.5 w-3.5 rotate-45" /> {app.preferred_routes}</span>}
                             </div>
                             <p className="text-xs text-muted-foreground">
                               Soumis le {format(new Date(app.created_at), 'dd MMM yyyy à HH:mm', { locale: fr })}
@@ -1050,6 +1887,40 @@ export default function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Close All Active Offers Confirmation Dialog */}
+      <AlertDialog open={isBulkCloseOpen} onOpenChange={setIsBulkCloseOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <Lock className="h-5 w-5" />
+              Clôturer toutes les offres disponibles ?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-sm">
+              <p>
+                Cette action va clôturer et masquer immédiatement les{' '}
+                <strong>{offers.filter(o => o.is_active).length} offre(s) de fret actives</strong> aux yeux des clients.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Aucune nouvelle réservation ne sera possible sur ces offres. Vos réservations et colis déjà enregistrés resteront accessibles.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isClosingAll}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleCloseAllActiveOffers();
+              }}
+              disabled={isClosingAll}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground font-medium"
+            >
+              {isClosingAll ? 'Clôture en cours...' : 'Confirmer la clôture générale'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }
