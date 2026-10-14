@@ -222,6 +222,11 @@ export default function Dashboard() {
   const [clientHourFilter, setClientHourFilter] = useState<'all' | 'morning' | 'afternoon' | 'evening' | 'night'>('all');
   const [clientDateFilter, setClientDateFilter] = useState<'all' | 'today' | 'this_week'>('all');
 
+  // Active Tab handling
+  const defaultTab = isCarrier ? 'carrier-offers' : 'reservations';
+  const requestedTab = searchParams.get('tab');
+  const currentTab = (requestedTab && (isCarrier || !requestedTab.startsWith('carrier-'))) ? requestedTab : defaultTab;
+
   // Form state
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -624,7 +629,7 @@ export default function Dashboard() {
     setIsClosingAll(true);
     try {
       let closedCount = 0;
-      const { data: rpcCount, error: rpcError } = await supabase.rpc('close_carrier_active_offers');
+      const { data: rpcCount, error: rpcError } = await (supabase.rpc as any)('close_carrier_active_offers');
 
       if (!rpcError && typeof rpcCount === 'number') {
         closedCount = rpcCount;

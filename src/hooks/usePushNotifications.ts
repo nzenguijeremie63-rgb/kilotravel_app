@@ -52,7 +52,7 @@ export const usePushNotifications = () => {
       // Sauvegarder l'abonnement dans Supabase
       const subscriptionJSON = subscription.toJSON();
       
-      const { error } = await supabase.from('push_subscriptions').upsert({
+      const { error } = await supabase.from('push_subscriptions' as any).upsert({
         user_id: user.id,
         endpoint: subscriptionJSON.endpoint,
         p256dh: subscriptionJSON.keys?.p256dh,
@@ -80,7 +80,7 @@ export const usePushNotifications = () => {
         if (user) {
           // Supprimer de Supabase
           await supabase
-            .from('push_subscriptions')
+            .from('push_subscriptions' as any)
             .delete()
             .match({ endpoint: subscription.endpoint });
         }

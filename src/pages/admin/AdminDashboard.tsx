@@ -105,17 +105,20 @@ interface CargoOffer {
 interface Reservation {
   id: string;
   cargo_offer_id: string;
+  offer_id?: string;
   tracking_code: string;
   kilos_reserved: number;
   status: ShipmentStatus;
   status_updated_at?: string;
   created_at: string;
-  profiles: {
+  profiles?: {
     full_name: string | null;
+    phone_number?: string | null;
   } | null;
   cargo_offers: {
     departure_city: string;
     arrival_city: string;
+    departure_date?: string;
   };
 }
 
@@ -273,7 +276,7 @@ export default function AdminDashboard() {
           .from('reservations')
           .select(`
             *,
-            cargo_offers (departure_city, arrival_city)
+            cargo_offers (departure_city, arrival_city, departure_date)
           `)
           .order('created_at', { ascending: false }),
         supabase
@@ -558,7 +561,7 @@ export default function AdminDashboard() {
     setIsClosingAll(true);
     try {
       let closedCount = 0;
-      const { data: rpcCount, error: rpcError } = await supabase.rpc('close_all_active_offers');
+      const { data: rpcCount, error: rpcError } = await (supabase.rpc as any)('close_all_active_offers');
 
       if (!rpcError && typeof rpcCount === 'number') {
         closedCount = rpcCount;
