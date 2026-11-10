@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth-context";
 import Index from "./pages/Index";
 import Offers from "./pages/Offers";
+import Simulator from "./pages/Simulator";
 import Track from "./pages/Track";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -32,6 +33,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/offers" element={<Offers />} />
+            <Route path="/simulateur" element={<Simulator />} />
             <Route path="/track" element={<Track />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />

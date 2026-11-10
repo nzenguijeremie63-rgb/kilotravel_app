@@ -54,6 +54,7 @@ import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useNotifications } from '@/hooks/use-notifications';
+import { fcfaToEur, formatEUR, formatFCFA } from '@/lib/currency';
 
 export type ShipmentStatus = 
   | 'pending_submission'
@@ -238,10 +239,22 @@ export default function Dashboard() {
     }
   }, [user, authLoading, navigate]);
 
-  // Handle URL param ?new=1 to open publication modal directly
+  // Handle URL param ?new=1 to open publication modal directly (optionally prefilled from the simulator)
   useEffect(() => {
     if (searchParams.get('new') === '1' && isCarrier) {
-      setOfferForm(defaultNewOffer);
+      const prefilledKilos = parseInt(searchParams.get('kilos') || '', 10);
+      const prefilledPrice = parseFloat(searchParams.get('price') || '');
+      const kilosValue = Number.isFinite(prefilledKilos) && prefilledKilos > 0
+        ? prefilledKilos
+        : defaultNewOffer.total_kilos;
+      setOfferForm({
+        ...defaultNewOffer,
+        total_kilos: kilosValue,
+        available_kilos: kilosValue,
+        price_per_kilo: Number.isFinite(prefilledPrice) && prefilledPrice > 0
+          ? prefilledPrice
+          : defaultNewOffer.price_per_kilo,
+      });
       setEditingOffer(null);
       setOfferModalOpen(true);
     }
@@ -539,10 +552,9 @@ export default function Dashboard() {
       }
 
       setOfferModalOpen(false);
-      // Remove ?new=1 from URL if present
+      // Remove prefill params from URL if present
       if (searchParams.get('new') === '1') {
-        searchParams.delete('new');
-        setSearchParams(searchParams);
+        setSearchParams({ tab: 'carrier-offers' });
       }
       fetchData();
     } catch (err: any) {
@@ -1213,7 +1225,10 @@ export default function Dashboard() {
                               <div>
                                 <p className="text-muted-foreground">Prix par kilo</p>
                                 <p className="font-semibold text-sm text-secondary">
-                                  {offer.price_per_kilo.toLocaleString()} FCFA
+                                  {formatFCFA(offer.price_per_kilo)}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  ≈ {formatEUR(fcfaToEur(offer.price_per_kilo))}/kg
                                 </p>
                               </div>
                             </div>
@@ -2355,8 +2370,34 @@ export default function Dashboard() {
                   onChange={(e) => setOfferForm({ ...offerForm, price_per_kilo: parseFloat(e.target.value) || 0 })}
                   placeholder="Ex: 5000"
                 />
+                {!!offerForm.price_per_kilo && (
+                  <p className="text-xs text-muted-foreground">
+                    ≈ {formatEUR(fcfaToEur(offerForm.price_per_kilo))}/kg
+                  </p>
+                )}
               </div>
             </div>
+
+            {(offerForm.total_kilos || 0) > 0 && (offerForm.price_per_kilo || 0) > 0 && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/30 p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                    Gains potentiels estimés
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {offerForm.total_kilos} kg × {formatFCFA(offerForm.price_per_kilo || 0)}/kg
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="font-display text-lg font-bold text-foreground">
+                    {formatFCFA((offerForm.total_kilos || 0) * (offerForm.price_per_kilo || 0))}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    ≈ {formatEUR(fcfaToEur((offerForm.total_kilos || 0) * (offerForm.price_per_kilo || 0)))}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

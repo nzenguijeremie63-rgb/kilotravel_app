@@ -35,6 +35,11 @@ export function Footer() {
                 </Link>
               </li>
               <li>
+                <Link to="/simulateur" className="hover:text-secondary transition-colors">
+                  Simulateur de gains
+                </Link>
+              </li>
+              <li>
                 <Link to="/track" className="hover:text-secondary transition-colors">
                   Suivi Colis
                 </Link>

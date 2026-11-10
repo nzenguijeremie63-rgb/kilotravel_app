@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CountryFlag } from '@/components/ui/CountryFlag';
+import { fcfaToEur, formatEUR, formatFCFA } from '@/lib/currency';
 
 interface CargoOffer {
   id: string;
@@ -78,7 +79,10 @@ export function CargoOfferCard({ offer, onReserve }: CargoOfferCardProps) {
           <div>
             <p className="text-xs text-muted-foreground mb-1">Prix par kilo</p>
             <p className="font-display text-2xl font-bold text-foreground">
-              {offer.price_per_kilo.toLocaleString('fr-FR')} <span className="text-sm font-normal text-muted-foreground">FCFA</span>
+              {formatFCFA(offer.price_per_kilo)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              ≈ {formatEUR(fcfaToEur(offer.price_per_kilo))}/kg
             </p>
           </div>
           

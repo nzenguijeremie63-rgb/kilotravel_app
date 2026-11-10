@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, Package, Shield, Globe, Clock, Search, Plane } from 'lucide-react';
+import { ArrowRight, Package, Shield, Globe, Clock, Search, Plane, Calculator } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -22,7 +23,7 @@ interface CargoOffer {
   price_per_kilo: number;
 }
 
-const features = [
+const features: { icon: LucideIcon; title: string; description: string; href?: string }[] = [
   {
     icon: Globe,
     title: 'Réseau Africain',
@@ -37,6 +38,12 @@ const features = [
     icon: Clock,
     title: 'Suivi Temps Réel',
     description: 'Suivez l\'état de votre colis à chaque étape du transport.',
+  },
+  {
+    icon: Calculator,
+    title: 'Gains en FCFA',
+    description: 'Voyageur ? Estimez en francs CFA ce que vos kilos peuvent vous rapporter.',
+    href: '/simulateur',
   },
 ];
 
@@ -169,23 +176,34 @@ export default function Index() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8">
-            {features.map((feature) => (
-              <div 
-                key={feature.title}
-                className="group p-6 bg-card rounded-xl border border-border/50 hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
-              >
-                <div className="h-12 w-12 rounded-lg bg-secondary/10 flex items-center justify-center mb-4 group-hover:bg-secondary/20 transition-colors">
-                  <feature.icon className="h-6 w-6 text-secondary" />
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+            {features.map((feature) => {
+              const cardContent = (
+                <>
+                  <div className="h-12 w-12 rounded-lg bg-secondary/10 flex items-center justify-center mb-4 group-hover:bg-secondary/20 transition-colors">
+                    <feature.icon className="h-6 w-6 text-secondary" />
+                  </div>
+                  <h3 className="font-display text-lg font-semibold text-foreground mb-2">
+                    {feature.title}
+                  </h3>
+                  <p className="text-muted-foreground text-sm">
+                    {feature.description}
+                  </p>
+                </>
+              );
+
+              const cardClassName = "group p-6 bg-card rounded-xl border border-border/50 hover:shadow-lg transition-all duration-300 hover:-translate-y-1";
+
+              return feature.href ? (
+                <Link key={feature.title} to={feature.href} className={cardClassName}>
+                  {cardContent}
+                </Link>
+              ) : (
+                <div key={feature.title} className={cardClassName}>
+                  {cardContent}
                 </div>
-                <h3 className="font-display text-lg font-semibold text-foreground mb-2">
-                  {feature.title}
-                </h3>
-                <p className="text-muted-foreground text-sm">
-                  {feature.description}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>

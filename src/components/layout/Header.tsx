@@ -49,6 +49,12 @@ export function Header() {
             Offres
           </Link>
           <Link 
+            to="/simulateur" 
+            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Simulateur de gains
+          </Link>
+          <Link 
             to="/track" 
             className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -159,6 +165,13 @@ export function Header() {
               onClick={() => setMobileMenuOpen(false)}
             >
               Offres
+            </Link>
+            <Link 
+              to="/simulateur" 
+              className="text-sm font-medium py-2"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Simulateur de gains
             </Link>
             <Link 
               to="/track" 
