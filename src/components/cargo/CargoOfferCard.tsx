@@ -1,11 +1,12 @@
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Plane, Calendar, Package, ArrowRight } from 'lucide-react';
+import { Plane, Calendar, Package, ArrowRight, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CountryFlag } from '@/components/ui/CountryFlag';
 import { fcfaToEur, formatEUR, formatFCFA } from '@/lib/currency';
+import { getCategoryLabel } from '@/lib/package-categories';
 
 interface CargoOffer {
   id: string;
@@ -18,6 +19,9 @@ interface CargoOffer {
   departure_date: string;
   available_kilos: number;
   price_per_kilo: number;
+  departure_airport?: string | null;
+  meeting_point?: string | null;
+  accepted_categories?: string[] | null;
 }
 
 interface CargoOfferCardProps {
@@ -73,6 +77,42 @@ export function CargoOfferCard({ offer, onReserve }: CargoOfferCardProps) {
             <span>{offer.available_kilos} kg disponibles</span>
           </div>
         </div>
+
+        {/* Meeting details */}
+        {(offer.departure_airport || offer.meeting_point) && (
+          <div className="space-y-1 mb-4 text-xs text-muted-foreground">
+            {offer.departure_airport && (
+              <div className="flex items-center gap-1.5">
+                <Plane className="h-3.5 w-3.5 text-secondary" />
+                <span>
+                  Aéroport : <span className="font-medium text-foreground">{offer.departure_airport}</span>
+                </span>
+              </div>
+            )}
+            {offer.meeting_point && (
+              <div className="flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 text-secondary" />
+                <span>{offer.meeting_point}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Accepted package types */}
+        {offer.accepted_categories && offer.accepted_categories.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {offer.accepted_categories.slice(0, 4).map((value) => (
+              <Badge key={value} variant="secondary" className="text-[10px] font-normal">
+                {getCategoryLabel(value)}
+              </Badge>
+            ))}
+            {offer.accepted_categories.length > 4 && (
+              <Badge variant="outline" className="text-[10px] font-normal">
+                +{offer.accepted_categories.length - 4}
+              </Badge>
+            )}
+          </div>
+        )}
 
         {/* Price & Action */}
         <div className="flex items-center justify-between pt-4 border-t border-border/50">

@@ -16,17 +16,20 @@ export type Database = {
     Tables: {
       cargo_offers: {
         Row: {
+          accepted_categories: string[]
           arrival_city: string
           arrival_country: string
           arrival_country_flag: string
           available_kilos: number
           created_at: string
+          departure_airport: string | null
           departure_city: string
           departure_country: string
           departure_country_flag: string
           departure_date: string
           id: string
           is_active: boolean | null
+          meeting_point: string | null
           price_per_kilo: number
           status?: string | null
           total_kilos: number
@@ -34,17 +37,20 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          accepted_categories?: string[]
           arrival_city: string
           arrival_country: string
           arrival_country_flag: string
           available_kilos: number
           created_at?: string
+          departure_airport?: string | null
           departure_city: string
           departure_country: string
           departure_country_flag: string
           departure_date: string
           id?: string
           is_active?: boolean | null
+          meeting_point?: string | null
           price_per_kilo: number
           status?: string | null
           total_kilos: number
@@ -52,17 +58,20 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          accepted_categories?: string[]
           arrival_city?: string
           arrival_country?: string
           arrival_country_flag?: string
           available_kilos?: number
           created_at?: string
+          departure_airport?: string | null
           departure_city?: string
           departure_country?: string
           departure_country_flag?: string
           departure_date?: string
           id?: string
           is_active?: boolean | null
+          meeting_point?: string | null
           price_per_kilo?: number
           status?: string | null
           total_kilos?: number

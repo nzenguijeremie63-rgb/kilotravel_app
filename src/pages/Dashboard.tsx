@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { CountryFlag } from '@/components/ui/CountryFlag';
+import { PACKAGE_CATEGORIES, DEFAULT_ACCEPTED_CATEGORIES, getCategoryLabel } from '@/lib/package-categories';
 import {
   Dialog,
   DialogContent,
@@ -109,6 +110,9 @@ interface Reservation {
 
 interface CarrierOffer {
   id: string;
+  departure_airport?: string | null;
+  meeting_point?: string | null;
+  accepted_categories?: string[] | null;
   departure_city: string;
   departure_country: string;
   departure_country_flag: string;
@@ -160,6 +164,9 @@ const statusColors: Record<ShipmentStatus, string> = {
 };
 
 const defaultNewOffer: Partial<CarrierOffer> = {
+  departure_airport: '',
+  meeting_point: '',
+  accepted_categories: DEFAULT_ACCEPTED_CATEGORIES,
   departure_city: '',
   departure_country: '',
   departure_country_flag: '',
@@ -471,7 +478,7 @@ export default function Dashboard() {
   // Carrier Offer Management
   const handleOpenNewOfferModal = () => {
     setEditingOffer(null);
-    setOfferForm(defaultNewOffer);
+    setOfferForm({ ...defaultNewOffer, accepted_categories: [...DEFAULT_ACCEPTED_CATEGORIES] });
     setOfferModalOpen(true);
   };
 
@@ -502,6 +509,15 @@ export default function Dashboard() {
       return;
     }
 
+    if (!offerForm.accepted_categories || offerForm.accepted_categories.length === 0) {
+      toast({
+        title: 'Catégories manquantes',
+        description: 'Sélectionnez au moins un type de colis accepté.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -515,6 +531,11 @@ export default function Dashboard() {
             arrival_city: offerForm.arrival_city.trim(),
             arrival_country: offerForm.arrival_country?.trim() || 'France',
             arrival_country_flag: offerForm.arrival_country_flag?.trim() || 'fr',
+            departure_airport: offerForm.departure_airport?.trim().toUpperCase() || null,
+            meeting_point: offerForm.meeting_point?.trim() || null,
+            accepted_categories: offerForm.accepted_categories?.length
+              ? offerForm.accepted_categories
+              : DEFAULT_ACCEPTED_CATEGORIES,
             departure_date: offerForm.departure_date,
             total_kilos: offerForm.total_kilos,
             available_kilos: offerForm.available_kilos ?? offerForm.total_kilos,
@@ -537,6 +558,11 @@ export default function Dashboard() {
             arrival_city: offerForm.arrival_city.trim(),
             arrival_country: offerForm.arrival_country?.trim() || 'France',
             arrival_country_flag: offerForm.arrival_country_flag?.trim() || 'fr',
+            departure_airport: offerForm.departure_airport?.trim().toUpperCase() || null,
+            meeting_point: offerForm.meeting_point?.trim() || null,
+            accepted_categories: offerForm.accepted_categories?.length
+              ? offerForm.accepted_categories
+              : DEFAULT_ACCEPTED_CATEGORIES,
             departure_date: offerForm.departure_date,
             total_kilos: offerForm.total_kilos,
             available_kilos: offerForm.total_kilos,
@@ -1232,6 +1258,38 @@ export default function Dashboard() {
                                 </p>
                               </div>
                             </div>
+
+                            {(offer.departure_airport || offer.meeting_point) && (
+                              <div className="space-y-1 text-xs text-muted-foreground">
+                                {offer.departure_airport && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Plane className="h-3.5 w-3.5 text-secondary" />
+                                    <span>Aéroport {offer.departure_airport}</span>
+                                  </div>
+                                )}
+                                {offer.meeting_point && (
+                                  <div className="flex items-center gap-1.5">
+                                    <MapPin className="h-3.5 w-3.5 text-secondary" />
+                                    <span>{offer.meeting_point}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {offer.accepted_categories && offer.accepted_categories.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {offer.accepted_categories.slice(0, 3).map((value) => (
+                                  <Badge key={value} variant="secondary" className="text-[10px] font-normal">
+                                    {getCategoryLabel(value)}
+                                  </Badge>
+                                ))}
+                                {offer.accepted_categories.length > 3 && (
+                                  <Badge variant="outline" className="text-[10px] font-normal">
+                                    +{offer.accepted_categories.length - 3}
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
 
                             {/* Booked Parcels Preview directly on Offer Card */}
                             <div className="pt-2 border-t border-border space-y-2">
@@ -2262,7 +2320,7 @@ export default function Dashboard() {
 
       {/* Carrier Offer Publication Modal */}
       <Dialog open={offerModalOpen} onOpenChange={setOfferModalOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingOffer ? 'Modifier l’offre de transport' : 'Publier une nouvelle offre de kilos'}
@@ -2342,6 +2400,27 @@ export default function Dashboard() {
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Aéroport de départ</Label>
+                <Input
+                  value={offerForm.departure_airport || ''}
+                  onChange={(e) => setOfferForm({ ...offerForm, departure_airport: e.target.value.toUpperCase() })}
+                  placeholder="Ex : CDG"
+                  maxLength={4}
+                  className="uppercase"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Point de rencontre</Label>
+                <Input
+                  value={offerForm.meeting_point || ''}
+                  onChange={(e) => setOfferForm({ ...offerForm, meeting_point: e.target.value })}
+                  placeholder="Ex : Terminal 1, porte 3"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Kilos disponibles *</Label>
@@ -2376,6 +2455,38 @@ export default function Dashboard() {
                   </p>
                 )}
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Types de colis acceptés</Label>
+              <div className="flex flex-wrap gap-2">
+                {PACKAGE_CATEGORIES.map((item) => {
+                  const selected = (offerForm.accepted_categories ?? DEFAULT_ACCEPTED_CATEGORIES).includes(item.value);
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => {
+                        const current = offerForm.accepted_categories ?? DEFAULT_ACCEPTED_CATEGORIES;
+                        const next = selected
+                          ? current.filter((value) => value !== item.value)
+                          : [...current, item.value];
+                        setOfferForm({ ...offerForm, accepted_categories: next });
+                      }}
+                      className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                        selected
+                          ? 'border-secondary bg-secondary/10 text-secondary'
+                          : 'border-border text-muted-foreground hover:border-secondary/50'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Les expéditeurs ne pourront choisir que ces catégories lors de la réservation.
+              </p>
             </div>
 
             {(offerForm.total_kilos || 0) > 0 && (offerForm.price_per_kilo || 0) > 0 && (

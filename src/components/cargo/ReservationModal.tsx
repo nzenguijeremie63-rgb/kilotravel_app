@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Plane, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Plane, AlertCircle, ShieldCheck, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -28,6 +28,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { CountryFlag } from '@/components/ui/CountryFlag';
 import { fcfaToEur, formatEUR, formatFCFA } from '@/lib/currency';
+import {
+  PACKAGE_CATEGORIES,
+  DEFAULT_ACCEPTED_CATEGORIES,
+  getCategoryLabel,
+} from '@/lib/package-categories';
 
 interface CargoOffer {
   id: string;
@@ -40,6 +45,9 @@ interface CargoOffer {
   departure_date: string;
   available_kilos: number;
   price_per_kilo: number;
+  departure_airport?: string | null;
+  meeting_point?: string | null;
+  accepted_categories?: string[] | null;
 }
 
 interface ReservationModalProps {
@@ -47,16 +55,6 @@ interface ReservationModalProps {
   open: boolean;
   onClose: () => void;
 }
-
-const packageCategories = [
-  { value: 'documents', label: 'Documents & Papiers' },
-  { value: 'vetements', label: 'Vêtements & Textile' },
-  { value: 'vivres', label: 'Vivres secs' },
-  { value: 'high-tech', label: 'High-tech inspecté' },
-  { value: 'cadeaux', label: 'Cadeaux sous emballage ouvert' },
-  { value: 'medicaments', label: 'Médicaments avec ordonnance' },
-  { value: 'autre', label: 'Autre' },
-];
 
 export function ReservationModal({ offer, open, onClose }: ReservationModalProps) {
   const [kilos, setKilos] = useState(1);
@@ -74,6 +72,10 @@ export function ReservationModal({ offer, open, onClose }: ReservationModalProps
     setKilos(1);
     setDescription('');
     setSecurityAccepted(false);
+    const allowed = offer?.accepted_categories?.length
+      ? offer.accepted_categories
+      : DEFAULT_ACCEPTED_CATEGORIES;
+    setCategory(allowed[0] ?? 'documents');
   }, [offer?.id]);
 
   useEffect(() => {
@@ -100,7 +102,10 @@ export function ReservationModal({ offer, open, onClose }: ReservationModalProps
 
   const totalPrice = kilos * offer.price_per_kilo;
   const formattedDate = format(new Date(offer.departure_date), "d MMMM yyyy", { locale: fr });
-  const categoryLabel = packageCategories.find((item) => item.value === category)?.label ?? 'Autre';
+  const categoryLabel = getCategoryLabel(category);
+  const availableCategories = offer.accepted_categories?.length
+    ? PACKAGE_CATEGORIES.filter((item) => offer.accepted_categories?.includes(item.value))
+    : PACKAGE_CATEGORIES;
 
   const handleSubmit = async () => {
     if (!user) {
@@ -219,6 +224,18 @@ export function ReservationModal({ offer, open, onClose }: ReservationModalProps
           Départ le {formattedDate}
         </div>
 
+        {(offer.departure_airport || offer.meeting_point) && (
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {offer.departure_airport && <span>Aéroport : {offer.departure_airport}</span>}
+            {offer.meeting_point && (
+              <span className="flex items-center gap-1">
+                <MapPin className="h-3 w-3" />
+                {offer.meeting_point}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="space-y-4">
           {/* Kilos Selection */}
           <div className="space-y-2">
@@ -305,7 +322,7 @@ export function ReservationModal({ offer, open, onClose }: ReservationModalProps
                 <SelectValue placeholder="Choisir une catégorie" />
               </SelectTrigger>
               <SelectContent>
-                {packageCategories.map((item) => (
+                {availableCategories.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
